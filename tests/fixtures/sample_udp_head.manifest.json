@@ -1,0 +1,15 @@
+{
+  "source": "Japannext_PTS_ITCH_Equities_v1.7.UDP.pcap",
+  "session": "1697659284",
+  "first_seq": 12562,
+  "last_seq": 14561,
+  "message_count": 2000,
+  "type_counts": {
+    "A": 1165,
+    "E": 757,
+    "H": 1,
+    "S": 2,
+    "T": 66,
+    "Y": 9
+  }
+}

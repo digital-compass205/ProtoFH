@@ -1,0 +1,57 @@
+{
+  "udp": {
+    "source": "Japannext_PTS_ITCH_Equities_v1.7.UDP.pcap",
+    "session": "1697659284",
+    "first_seq": 12562,
+    "last_seq": 234750,
+    "message_count": 222189,
+    "type_counts": {
+      "A": 128366,
+      "D": 10772,
+      "E": 67902,
+      "H": 1,
+      "S": 2,
+      "T": 5843,
+      "U": 9287,
+      "Y": 16
+    }
+  },
+  "tcp": {
+    "source": "Japannext_PTS_ITCH_Equities_v1.7.TCP.pcap",
+    "server_port": 15001,
+    "session": "1697486488",
+    "login_sequence": 3168301,
+    "message_count": 2632,
+    "type_counts": {
+      "A": 1666,
+      "D": 6,
+      "E": 775,
+      "T": 76,
+      "U": 109
+    },
+    "server_heartbeats": 0,
+    "end_of_session": false,
+    "trailing_bytes": 0,
+    "last_message_type": "OrderAdded"
+  },
+  "glimpse": {
+    "source": "Japannext_PTS_GLIMPSE_Equities_v1.4.pcap",
+    "server_port": 15002,
+    "session": "",
+    "login_sequence": 1,
+    "message_count": 8688,
+    "type_counts": {
+      "A": 295,
+      "H": 4181,
+      "L": 13,
+      "R": 4182,
+      "S": 1,
+      "T": 1,
+      "Y": 15
+    },
+    "server_heartbeats": 0,
+    "end_of_session": false,
+    "trailing_bytes": 1,
+    "last_message_type": "OrderAdded"
+  }
+}
