@@ -1,0 +1,15 @@
+# Test environment matching the RHEL 8 target: Python 3.6 on UBI8.
+# Build:  docker build -f Dockerfile.dev -t jnxfeed-test .
+# Run:    docker run --rm jnxfeed-test            (or: make test-docker)
+FROM registry.access.redhat.com/ubi8/python-36
+
+WORKDIR /app
+# pytest 7.0.1 is the last release supporting Python 3.6.
+RUN pip install --no-cache-dir pytest==7.0.1
+
+COPY setup.py setup.cfg README.md ./
+COPY jnxfeed ./jnxfeed
+COPY tests ./tests
+RUN pip install --no-cache-dir -e .
+
+CMD ["python", "-m", "pytest", "-v"]
