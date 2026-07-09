@@ -83,3 +83,19 @@ python -m jnxfeed stats     --host 127.0.0.1 --port 15001 --user TEST --pass SEC
 The simulator also serves GLIMPSE on `:15002`; add
 `--glimpse-host 127.0.0.1 --glimpse-port 15002` to any live view to
 bootstrap from a snapshot instead of full replay.
+
+## Benchmark
+
+`make bench` replays the full official UDP sample (222,189 messages,
+pre-loaded in memory; 3 repetitions, best shown). Numbers on the
+development box — **CPython 3.14, NOT the 3.6.4 deployment target**; the
+authoritative figures need the same script run under the UBI8 Python 3.6
+container (as with `make test-docker`):
+
+| stage                 | msgs/s (dev box, py3.14) |
+|-----------------------|--------------------------|
+| decode only           | ~1,030,000               |
+| decode + Market.apply |   ~379,000               |
+
+Both are far above real feed rates (and the plan's 50k msgs/s tuning
+threshold), so no hot-path tuning was done (T7.2).
