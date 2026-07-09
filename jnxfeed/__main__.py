@@ -1,27 +1,32 @@
 """Entry point: python -m jnxfeed <subcommand>.
 
-Implemented subcommands (T3.3 connectivity kit):
+Connectivity kit (T3.3):
   probe    — connect + SoupBinTCP login diagnostic (ITCH or GLIMPSE)
   capture  — stream a live ITCH session to a .itch file
 
-Later tasks add: replay, static, tail, book, stats (T7.1). Unknown or
-not-yet-implemented subcommands print a pointer and exit nonzero, so
-`python -m jnxfeed` always works.
+Views (T7.1) — each works on --itch-file / --pcap / live --host sources:
+  static   — static data table (directory, states, limits, ref prices)
+  tail     — one decoded line per message (filters: --types, --book)
+  book     — top-N levels + last trades for one SICC (live: ANSI refresh)
+  stats    — message rates, session/seq, book/order/orphan counters
+
+The exchange simulator runs separately: python -m jnxfeed.sim --help.
 """
 import sys
 
-_IMPLEMENTED = ("probe", "capture")
-_PLANNED = ("replay", "static", "tail", "book", "stats")
-
 _USAGE = """\
-usage: python -m jnxfeed <subcommand> [options]
+usage: python -m jnxfeed <subcommand> [options]   (--help per subcommand)
 
 subcommands:
-  probe    connect + SoupBinTCP login diagnostic (--help for options)
-  capture  stream a live ITCH session to a .itch file (--help for options)
+  probe    connect + SoupBinTCP login diagnostic
+  capture  stream a live ITCH session to a .itch file
+  static   static data table from a file/pcap/live source
+  tail     one decoded line per message
+  book     top-N levels + last trades for one order book
+  stats    message rates and state counters
 
-not yet implemented (coming with later tasks): {planned}
-""".format(planned=", ".join(_PLANNED))
+simulator: python -m jnxfeed.sim --itch-file F [--speed realtime] ...
+"""
 
 
 def main(argv=None):
@@ -38,12 +43,18 @@ def main(argv=None):
     if cmd == "capture":
         from jnxfeed.cli import capture
         return capture.main(rest)
-    if cmd in _PLANNED:
-        sys.stderr.write(
-            "jnxfeed: subcommand {!r} is not implemented yet "
-            "(coming with a later task)\n".format(cmd)
-        )
-        return 2
+    if cmd == "static":
+        from jnxfeed.cli import views
+        return views.main_static(rest)
+    if cmd == "tail":
+        from jnxfeed.cli import views
+        return views.main_tail(rest)
+    if cmd == "book":
+        from jnxfeed.cli import views
+        return views.main_book(rest)
+    if cmd == "stats":
+        from jnxfeed.cli import views
+        return views.main_stats(rest)
     sys.stderr.write("jnxfeed: unknown subcommand {!r}\n\n{}".format(cmd, _USAGE))
     return 2
 

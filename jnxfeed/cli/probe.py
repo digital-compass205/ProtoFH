@@ -25,10 +25,9 @@ import sys
 import time
 from collections import OrderedDict
 
-from jnxfeed import types
 from jnxfeed.cli import soupclient
+from jnxfeed.cli.describe import describe_itch  # re-exported; shared with T7.1 views
 from jnxfeed.itch import codec as itch_codec
-from jnxfeed.itch import schema as itch_schema
 from jnxfeed.soup import packets as sp
 
 EXIT_OK = 0
@@ -76,30 +75,6 @@ def build_parser():
     parser.add_argument("--report", metavar="FILE",
                         help="also write a timestamped JSON report to FILE")
     return parser
-
-
-# --- human-readable ITCH one-liners ------------------------------------------
-
-_PRICE_FIELDS = frozenset(
-    name
-    for fields in itch_schema.SCHEMAS.values()
-    for (name, _size, ftype) in fields
-    if ftype == itch_schema.PRICE
-)
-
-
-def describe_itch(payload):
-    """One human-readable line for one raw ITCH message."""
-    try:
-        msg = itch_codec.decode(payload)
-    except itch_codec.DecodeError as exc:
-        return "?? undecodable ({}): {}".format(exc, payload.hex())
-    parts = []
-    for name, value in zip(msg._fields, msg):
-        if name in _PRICE_FIELDS:
-            value = types.price_to_str(value)
-        parts.append("{}={}".format(name, value))
-    return "{} {} {}".format(chr(payload[0]), type(msg).__name__, " ".join(parts))
 
 
 # --- report helpers ------------------------------------------------------------

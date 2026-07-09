@@ -94,6 +94,16 @@ class FeedHandler(object):
         self._session = None
         self._connector = None
 
+    @property
+    def session_id(self):
+        """Soup session id once logged in (None before)."""
+        return self._session.session_id if self._session is not None else None
+
+    @property
+    def next_seq(self):
+        """Next expected sequence number (None before login)."""
+        return self._session.next_seq if self._session is not None else None
+
     # -- control -----------------------------------------------------------
 
     def start(self):
