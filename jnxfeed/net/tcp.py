@@ -85,6 +85,18 @@ class TcpSoupConnector(object):
         self._cancel_timers()
         self._close_socket()
 
+    def flush(self):
+        """Push any bytes the session has queued (e.g. a logout) to the
+        socket now, without waiting for the next tick."""
+        if self.state == STATE_CONNECTED:
+            self._flush_send()
+
+    def reconnect(self, exc=None):
+        """Force a disconnect/reconnect cycle (e.g. on peer silence)."""
+        if self.state != STATE_CONNECTED:
+            return
+        self._handle_disconnect(exc)
+
     # -- connecting -------------------------------------------------------------
 
     def _attempt_connect(self):

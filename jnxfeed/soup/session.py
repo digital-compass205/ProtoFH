@@ -123,6 +123,12 @@ class SoupSession(object):
         self._last_sent = now
         self.state = STATE_LOGIN_SENT
 
+    def logout(self, now=None):
+        """Queue a Logout Request (clean 'O' before closing the socket)."""
+        self._out += sp.encode(sp.LogoutRequest())
+        if now is not None:
+            self._last_sent = now
+
     # -- input -------------------------------------------------------------------
 
     def on_bytes(self, data, now):
