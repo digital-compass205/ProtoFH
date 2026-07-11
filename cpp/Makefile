@@ -27,15 +27,18 @@ TEST_DIR := $(ROOT)/test
 # Module ("library") sources shared by tools, main binaries and tests.
 # Future phases (market/, wire/, db/, fh/) just extend MOD_DIRS; main
 # binaries get their own target following the itch_replay pattern below.
-MOD_DIRS := itch soup market wire
-MOD_SRCS := $(foreach d,$(MOD_DIRS),$(wildcard $(ROOT)/$(d)/*.cpp))
+MOD_DIRS := itch soup market wire db
+# *_main.cpp files define main() for a process binary and must not be
+# linked into tests/tools — they get their own binary targets below.
+MOD_SRCS := $(filter-out %_main.cpp,$(foreach d,$(MOD_DIRS),$(wildcard $(ROOT)/$(d)/*.cpp)))
 MOD_OBJS := $(patsubst $(ROOT)/%.cpp,$(BUILD)/%.o,$(MOD_SRCS))
 
 # Conservative header dependency: any header change rebuilds everything.
 # Fine at this codebase size; swap for -MMD if it ever gets slow.
 HDRS := $(wildcard $(ROOT)/*/*.h)
 
-BINS := $(BUILD)/itch_replay $(BUILD)/book_dump $(BUILD)/gen_record_vectors
+BINS := $(BUILD)/itch_replay $(BUILD)/book_dump $(BUILD)/gen_record_vectors \
+        $(BUILD)/jnxdb
 
 .PHONY: all test clean
 
@@ -61,6 +64,11 @@ $(BUILD)/book_dump: $(BUILD)/tools/book_dump.o $(MOD_OBJS) | $(BUILD)
 
 $(BUILD)/gen_record_vectors: $(BUILD)/tools/gen_record_vectors.o $(MOD_OBJS) | $(BUILD)
 	$(CXX) $(CXXFLAGS) -o $@ $(BUILD)/tools/gen_record_vectors.o $(MOD_OBJS) $(LDFLAGS)
+
+# --- process binaries ----------------------------------------------------
+
+$(BUILD)/jnxdb: $(BUILD)/db/jnxdb_main.o $(MOD_OBJS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) -o $@ $(BUILD)/db/jnxdb_main.o $(MOD_OBJS) $(LDFLAGS)
 
 # --- test harness -----------------------------------------------------
 

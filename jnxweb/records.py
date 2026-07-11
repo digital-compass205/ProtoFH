@@ -1,8 +1,11 @@
-"""JNX record wire-format decoder (docs/wire_spec.md, version 1 — FROZEN).
+"""JNX record wire-format codec (docs/wire_spec.md, version 1 — FROZEN).
 
-Python port of the decode side of cpp/wire/record.{h,cpp}, for the
-multicast web client (jnxweb), tools/mcast_spy.py, and tests. Field
-names mirror the C++ structs exactly.
+Python port of cpp/wire/record.{h,cpp}: decode for the multicast web
+client (jnxweb), tools/mcast_spy.py, and tests; encode (added in F4)
+for test feeders and tooling that must speak the FH->DB protocol.
+Field names mirror the C++ structs exactly, and
+encode_record(decode_record(wire)) == wire for every kind (asserted
+against records.bin by tests/unit/test_records_encode_py.py).
 
 Target runtime is Python 3.6 (RHEL 8 platform python) — stdlib only,
 JNX_PLAN.md §0 subset. All wire integers are big-endian, hence the
@@ -308,3 +311,172 @@ def decode_stream(data):
         records.append(decode_record(data[offset:offset + total]))
         offset += total
     return records
+
+
+# --- encode (F4) ---------------------------------------------------------
+# Inverse of the decoders above. Input dicts use exactly the shapes the
+# decoders return; missing keys default to zero / empty (mirroring the
+# zero-initialised C++ structs). Level slots at index >= level_count are
+# forced to zero on the wire, matching the C++ encoder's zero-fill rule.
+
+def _alpha_enc(value, width):
+    """str -> fixed-width wire alpha: ASCII, right-padded with spaces."""
+    raw = value.encode("ascii")
+    if len(raw) > width:
+        raise RecordError(
+            "alpha value {!r} exceeds field width {}".format(value, width)
+        )
+    return raw + b" " * (width - len(raw))
+
+
+def _char_enc(value):
+    """1-char str (or '') -> single wire byte ('' -> 0x00)."""
+    if not value:
+        return b"\x00"
+    raw = value.encode("latin-1")
+    if len(raw) != 1:
+        raise RecordError("char field must be one byte, got {!r}".format(value))
+    return raw
+
+
+def encode_header(kind, body_len):
+    if kind not in BODY_SIZES:
+        raise RecordError("unknown record kind: {!r}".format(kind))
+    if body_len != BODY_SIZES[kind]:
+        raise RecordError(
+            "kind {!r}: body_len {} != expected {}".format(
+                kind, body_len, BODY_SIZES[kind]
+            )
+        )
+    return _HEADER.pack(RECORD_MAGIC, RECORD_VERSION,
+                        kind.encode("ascii"), body_len, 0)
+
+
+def encode_update(rec):
+    """Encode an UPDATE dict (decode_update shape) -> full wire record."""
+    bids = list(rec.get("bids", []))
+    asks = list(rec.get("asks", []))
+    while len(bids) < BOOK_DEPTH:
+        bids.append((0, 0, 0))
+    while len(asks) < BOOK_DEPTH:
+        asks.append((0, 0, 0))
+    n_bid = rec.get("level_count_bid", 0)
+    n_ask = rec.get("level_count_ask", 0)
+    if n_bid > BOOK_DEPTH or n_ask > BOOK_DEPTH:
+        raise RecordError("level count exceeds book depth 10")
+    level_values = []
+    for i in range(BOOK_DEPTH):
+        px, qty, cnt = bids[i] if i < n_bid else (0, 0, 0)
+        level_values.extend((px, qty, cnt))
+    for i in range(BOOK_DEPTH):
+        px, qty, cnt = asks[i] if i < n_ask else (0, 0, 0)
+        level_values.extend((px, qty, cnt))
+
+    body = _UPDATE_BODY.pack(
+        rec.get("epoch", 0),
+        rec.get("pub_seq", 0),
+        _alpha_enc(rec.get("session", ""), 10),
+        rec.get("exch_seq", 0),
+        rec.get("exch_ns", 0),
+        _char_enc(rec.get("trigger", "")),
+        _alpha_enc(rec.get("ticker", ""), 4),
+        _alpha_enc(rec.get("group", ""), 4),
+        _alpha_enc(rec.get("isin", ""), 12),
+        rec.get("round_lot", 0),
+        rec.get("tick_table_id", 0),
+        rec.get("price_decimals", 0),
+        rec.get("upper_limit", 0),
+        rec.get("lower_limit", 0),
+        rec.get("flags", 0),
+        _char_enc(rec.get("trading_state", "")),
+        _char_enc(rec.get("short_sell_restriction", "")),
+        rec.get("reference_price", 0),
+        _char_enc(rec.get("last_system_event", "")),
+        n_bid,
+        n_ask,
+        *(level_values + [
+            rec.get("total_bid_qty", 0),
+            rec.get("total_ask_qty", 0),
+            rec.get("total_bid_orders", 0),
+            rec.get("total_ask_orders", 0),
+            rec.get("last_price", 0),
+            rec.get("last_qty", 0),
+            rec.get("last_match_number", 0),
+            rec.get("last_trade_ns", 0),
+            rec.get("cum_qty", 0),
+            rec.get("cum_turnover", 0),
+            rec.get("trade_count", 0),
+            _char_enc(rec.get("delta_op", "")),
+            rec.get("delta_order_number", 0),
+            rec.get("delta_orig_order_number", 0),
+            _char_enc(rec.get("delta_side", "")),
+            rec.get("delta_price", 0),
+            rec.get("delta_qty", 0),
+            _char_enc(rec.get("delta_order_type", "")),
+        ])
+    )
+    return encode_header(KIND_UPDATE, len(body)) + body
+
+
+def encode_order(rec):
+    body = _ORDER_BODY.pack(
+        rec.get("order_number", 0),
+        _alpha_enc(rec.get("ticker", ""), 4),
+        _alpha_enc(rec.get("group", ""), 4),
+        _char_enc(rec.get("side", "")),
+        rec.get("price", 0),
+        rec.get("qty_remaining", 0),
+        _char_enc(rec.get("order_type", "")),
+    )
+    return encode_header(KIND_ORDER, len(body)) + body
+
+
+def encode_tick(rec):
+    body = _TICK_BODY.pack(
+        rec.get("table_id", 0),
+        rec.get("price_start", 0),
+        rec.get("tick_size", 0),
+    )
+    return encode_header(KIND_TICK, len(body)) + body
+
+
+def encode_hello(rec):
+    body = _HELLO_BODY.pack(
+        rec.get("epoch", 0),
+        rec.get("last_exch_seq", 0),
+    )
+    return encode_header(KIND_HELLO, len(body)) + body
+
+
+def encode_sync_end(rec):
+    body = _SYNC_END_BODY.pack(
+        _alpha_enc(rec.get("session", ""), 10),
+        rec.get("last_exch_seq", 0),
+        rec.get("epoch", 0),
+    )
+    return encode_header(KIND_SYNC_END, len(body)) + body
+
+
+def encode_control(kind):
+    """SYNC_BEGIN / GET_STATE / RESET — header-only records."""
+    if kind not in (KIND_SYNC_BEGIN, KIND_GET_STATE, KIND_RESET):
+        raise RecordError("not a control kind: {!r}".format(kind))
+    return encode_header(kind, 0)
+
+
+_KIND_ENCODERS = {
+    KIND_UPDATE: encode_update,
+    KIND_ORDER: encode_order,
+    KIND_TICK: encode_tick,
+    KIND_HELLO: encode_hello,
+    KIND_SYNC_END: encode_sync_end,
+}
+
+
+def encode_record(rec):
+    """Encode any record dict (shape of decode_record output) -> bytes."""
+    kind = rec.get("kind")
+    encoder = _KIND_ENCODERS.get(kind)
+    if encoder is not None:
+        return encoder(rec)
+    return encode_control(kind)
