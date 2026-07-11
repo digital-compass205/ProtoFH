@@ -1,0 +1,429 @@
+{
+  "vectors": [
+    {
+      "fields": {
+        "seconds": 34200
+      },
+      "hex": "5400008598",
+      "name": "t_basic",
+      "type": "T"
+    },
+    {
+      "fields": {
+        "seconds": 0
+      },
+      "hex": "5400000000",
+      "name": "t_zero_seconds",
+      "type": "T"
+    },
+    {
+      "fields": {
+        "seconds": 4294967295
+      },
+      "hex": "54ffffffff",
+      "name": "t_max_seconds",
+      "type": "T"
+    },
+    {
+      "fields": {
+        "event": "O",
+        "group": "DAY",
+        "ns": 1000
+      },
+      "hex": "53000003e8444159204f",
+      "name": "s_start_of_messages",
+      "type": "S"
+    },
+    {
+      "fields": {
+        "event": "Q",
+        "group": "",
+        "ns": 2000
+      },
+      "hex": "53000007d02020202051",
+      "name": "s_blank_group_system_wide",
+      "type": "S"
+    },
+    {
+      "fields": {
+        "event": "C",
+        "group": "NGHT",
+        "ns": 3000
+      },
+      "hex": "5300000bb84e47485443",
+      "name": "s_end_of_messages",
+      "type": "S"
+    },
+    {
+      "fields": {
+        "ns": 100,
+        "price_start": 1000,
+        "tick_size": 1,
+        "tick_table_id": 1
+      },
+      "hex": "4c000000640000000100000001000003e8",
+      "name": "l_basic",
+      "type": "L"
+    },
+    {
+      "fields": {
+        "ns": 200,
+        "price_start": 0,
+        "tick_size": 5,
+        "tick_table_id": 0
+      },
+      "hex": "4c000000c8000000000000000500000000",
+      "name": "l_zero_tick_table",
+      "type": "L"
+    },
+    {
+      "fields": {
+        "ns": 300,
+        "price_start": 2147483646,
+        "tick_size": 100,
+        "tick_table_id": 7
+      },
+      "hex": "4c0000012c00000007000000647ffffffe",
+      "name": "l_large_price_start",
+      "type": "L"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "isin": "JP3902400005",
+        "lower_limit": 100000,
+        "ns": 400,
+        "orderbook_id": "8306",
+        "price_decimals": 1,
+        "round_lot": 100,
+        "tick_table_id": 1,
+        "upper_limit": 200000
+      },
+      "hex": "5200000190383330364a50333930323430303030354441592000000064000000010000000100030d40000186a0",
+      "name": "r_daytime_market",
+      "type": "R"
+    },
+    {
+      "fields": {
+        "group": "NGHT",
+        "isin": "JP3633400001",
+        "lower_limit": 1,
+        "ns": 500,
+        "orderbook_id": "7203",
+        "price_decimals": 1,
+        "round_lot": 100,
+        "tick_table_id": 2,
+        "upper_limit": 999999
+      },
+      "hex": "52000001f4373230334a50333633333430303030314e474854000000640000000200000001000f423f00000001",
+      "name": "r_night_market",
+      "type": "R"
+    },
+    {
+      "fields": {
+        "group": "DAYX",
+        "isin": "",
+        "lower_limit": 0,
+        "ns": 600,
+        "orderbook_id": "0001",
+        "price_decimals": 1,
+        "round_lot": 1,
+        "tick_table_id": 0,
+        "upper_limit": 2147483647
+      },
+      "hex": "520000025830303031202020202020202020202020444159580000000100000000000000017fffffff00000000",
+      "name": "r_isin_blank_after_strip",
+      "type": "R"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 700,
+        "orderbook_id": "8306",
+        "state": "T"
+      },
+      "hex": "48000002bc383330364441592054",
+      "name": "h_trading",
+      "type": "H"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 800,
+        "orderbook_id": "7203",
+        "state": "V"
+      },
+      "hex": "4800000320373230334441592056",
+      "name": "h_suspended",
+      "type": "H"
+    },
+    {
+      "fields": {
+        "group": "DAYU",
+        "ns": 900,
+        "orderbook_id": "0001",
+        "state": "?"
+      },
+      "hex": "480000038430303031444159553f",
+      "name": "h_unknown_state",
+      "type": "H"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 1000,
+        "orderbook_id": "8306",
+        "state": "0"
+      },
+      "hex": "59000003e8383330364441592030",
+      "name": "y_unrestricted",
+      "type": "Y"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 1100,
+        "orderbook_id": "7203",
+        "state": "1"
+      },
+      "hex": "590000044c373230334441592031",
+      "name": "y_restricted",
+      "type": "Y"
+    },
+    {
+      "fields": {
+        "group": "DAYU",
+        "ns": 1200,
+        "orderbook_id": "0001",
+        "state": "?"
+      },
+      "hex": "59000004b030303031444159553f",
+      "name": "y_unknown_state",
+      "type": "Y"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 1300,
+        "order_number": 123456789,
+        "orderbook_id": "8306",
+        "price": 15000,
+        "qty": 100,
+        "side": "B"
+      },
+      "hex": "410000051400000000075bcd154200000064383330364441592000003a98",
+      "name": "a_buy_basic",
+      "type": "A"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 1400,
+        "order_number": 987654321,
+        "orderbook_id": "7203",
+        "price": 25000,
+        "qty": 4294967295,
+        "side": "S"
+      },
+      "hex": "4100000578000000003ade68b153ffffffff3732303344415920000061a8",
+      "name": "a_sell_max_qty",
+      "type": "A"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 1500,
+        "order_number": 0,
+        "orderbook_id": "8306",
+        "price": 2147483647,
+        "qty": 0,
+        "side": "B"
+      },
+      "hex": "41000005dc0000000000000000420000000038333036444159207fffffff",
+      "name": "a_ref_price_no_price",
+      "type": "A"
+    },
+    {
+      "fields": {
+        "group": "DAY",
+        "ns": 1600,
+        "order_number": 0,
+        "orderbook_id": "8306",
+        "price": 99999,
+        "qty": 0,
+        "side": "B"
+      },
+      "hex": "41000006400000000000000000420000000038333036444159200001869f",
+      "name": "a_ref_price_real_value",
+      "type": "A"
+    },
+    {
+      "fields": {
+        "attribution": "ABCD",
+        "group": "DAY",
+        "ns": 1700,
+        "order_number": 42,
+        "order_type": "Q",
+        "orderbook_id": "8306",
+        "price": 15000,
+        "qty": 500,
+        "side": "B"
+      },
+      "hex": "46000006a4000000000000002a42000001f4383330364441592000003a984142434451",
+      "name": "f_dlp_order",
+      "type": "F"
+    },
+    {
+      "fields": {
+        "attribution": "",
+        "group": "DAY",
+        "ns": 1800,
+        "order_number": 43,
+        "order_type": "Q",
+        "orderbook_id": "7203",
+        "price": 16000,
+        "qty": 600,
+        "side": "S"
+      },
+      "hex": "4600000708000000000000002b5300000258373230334441592000003e802020202051",
+      "name": "f_blank_attribution",
+      "type": "F"
+    },
+    {
+      "fields": {
+        "attribution": "",
+        "group": "DAYU",
+        "ns": 1900,
+        "order_number": 44,
+        "order_type": "",
+        "orderbook_id": "0001",
+        "price": 17000,
+        "qty": 700,
+        "side": "B"
+      },
+      "hex": "460000076c000000000000002c42000002bc3030303144415955000042682020202020",
+      "name": "f_regular_order_blank_type",
+      "type": "F"
+    },
+    {
+      "fields": {
+        "executed_qty": 100,
+        "match_number": 1,
+        "ns": 2000,
+        "order_number": 42
+      },
+      "hex": "45000007d0000000000000002a000000640000000000000001",
+      "name": "e_basic",
+      "type": "E"
+    },
+    {
+      "fields": {
+        "executed_qty": 1,
+        "match_number": 18446744073709551615,
+        "ns": 2100,
+        "order_number": 43
+      },
+      "hex": "4500000834000000000000002b00000001ffffffffffffffff",
+      "name": "e_large_match_number",
+      "type": "E"
+    },
+    {
+      "fields": {
+        "executed_qty": 0,
+        "match_number": 2,
+        "ns": 2200,
+        "order_number": 44
+      },
+      "hex": "4500000898000000000000002c000000000000000000000002",
+      "name": "e_zero_qty_edge",
+      "type": "E"
+    },
+    {
+      "fields": {
+        "ns": 2300,
+        "order_number": 42
+      },
+      "hex": "44000008fc000000000000002a",
+      "name": "d_basic",
+      "type": "D"
+    },
+    {
+      "fields": {
+        "ns": 2400,
+        "order_number": 1
+      },
+      "hex": "44000009600000000000000001",
+      "name": "d_small_order_number",
+      "type": "D"
+    },
+    {
+      "fields": {
+        "ns": 2500,
+        "order_number": 18446744073709551615
+      },
+      "hex": "44000009c4ffffffffffffffff",
+      "name": "d_max_order_number",
+      "type": "D"
+    },
+    {
+      "fields": {
+        "new_order_number": 4200,
+        "ns": 2600,
+        "orig_order_number": 42,
+        "price": 15500,
+        "qty": 200
+      },
+      "hex": "5500000a28000000000000002a0000000000001068000000c800003c8c",
+      "name": "u_basic",
+      "type": "U"
+    },
+    {
+      "fields": {
+        "new_order_number": 4300,
+        "ns": 2700,
+        "orig_order_number": 43,
+        "price": 16500,
+        "qty": 4294967295
+      },
+      "hex": "5500000a8c000000000000002b00000000000010ccffffffff00004074",
+      "name": "u_max_qty",
+      "type": "U"
+    },
+    {
+      "fields": {
+        "new_order_number": 4400,
+        "ns": 2800,
+        "orig_order_number": 44,
+        "price": 1,
+        "qty": 1
+      },
+      "hex": "5500000af0000000000000002c00000000000011300000000100000001",
+      "name": "u_min_price",
+      "type": "U"
+    },
+    {
+      "fields": {
+        "sequence_number": 0
+      },
+      "hex": "470000000000000000",
+      "name": "g_zero",
+      "type": "G"
+    },
+    {
+      "fields": {
+        "sequence_number": 12562
+      },
+      "hex": "470000000000003112",
+      "name": "g_basic",
+      "type": "G"
+    },
+    {
+      "fields": {
+        "sequence_number": 18446744073709551615
+      },
+      "hex": "47ffffffffffffffff",
+      "name": "g_large_binary_seq",
+      "type": "G"
+    }
+  ]
+}

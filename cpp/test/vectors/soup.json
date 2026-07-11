@@ -1,0 +1,136 @@
+{
+  "vectors": [
+    {
+      "fields": {
+        "password": "",
+        "requested_sequence": 0,
+        "requested_session": "",
+        "username": ""
+      },
+      "hex": "002f4c20202020202020202020202020202020202020202020202020202020202020202020202020202020202020202030",
+      "name": "login_request_minimal",
+      "type": "L"
+    },
+    {
+      "fields": {
+        "password": "pass",
+        "requested_sequence": 12562,
+        "requested_session": "1697659284",
+        "username": "usr"
+      },
+      "hex": "002f4c75737220202070617373202020202020313639373635393238342020202020202020202020202020203132353632",
+      "name": "login_request_typical",
+      "type": "L"
+    },
+    {
+      "fields": {
+        "password": "PASSWORD12",
+        "requested_sequence": 18446744073709551615,
+        "requested_session": "SESSION123",
+        "username": "USER12"
+      },
+      "hex": "002f4c55534552313250415353574f5244313253455353494f4e3132333138343436373434303733373039353531363135",
+      "name": "login_request_exact_width_fill",
+      "type": "L"
+    },
+    {
+      "fields": {
+        "sequence": 1,
+        "session": "1"
+      },
+      "hex": "001f41202020202020202020312020202020202020202020202020202020202031",
+      "name": "login_accepted_minimal",
+      "type": "A"
+    },
+    {
+      "fields": {
+        "sequence": 12562,
+        "session": "1697659284"
+      },
+      "hex": "001f41313639373635393238342020202020202020202020202020203132353632",
+      "name": "login_accepted_typical",
+      "type": "A"
+    },
+    {
+      "fields": {
+        "sequence": 18446744073709551615,
+        "session": "ABCDEFGHIJ"
+      },
+      "hex": "001f414142434445464748494a3138343436373434303733373039353531363135",
+      "name": "login_accepted_exact_width_fill",
+      "type": "A"
+    },
+    {
+      "fields": {
+        "reject_code": "A"
+      },
+      "hex": "00024a41",
+      "name": "login_rejected_not_authorized",
+      "type": "J"
+    },
+    {
+      "fields": {
+        "reject_code": "S"
+      },
+      "hex": "00024a53",
+      "name": "login_rejected_session_unavailable",
+      "type": "J"
+    },
+    {
+      "fields": {
+        "payload_hex": "5400008598"
+      },
+      "hex": "0006535400008598",
+      "name": "sequenced_data_timestamp",
+      "type": "S"
+    },
+    {
+      "fields": {
+        "payload_hex": "410000051400000000075bcd154200000064383330364441592000003a98"
+      },
+      "hex": "001f53410000051400000000075bcd154200000064383330364441592000003a98",
+      "name": "sequenced_data_order_added",
+      "type": "S"
+    },
+    {
+      "fields": {},
+      "hex": "000148",
+      "name": "server_heartbeat",
+      "type": "H"
+    },
+    {
+      "fields": {},
+      "hex": "00015a",
+      "name": "end_of_session",
+      "type": "Z"
+    },
+    {
+      "fields": {
+        "payload_hex": "64656275673a207265706c61792063617567687420757020746f2073657120323334373531"
+      },
+      "hex": "00262b64656275673a207265706c61792063617567687420757020746f2073657120323334373531",
+      "name": "debug_packet",
+      "type": "+"
+    },
+    {
+      "fields": {
+        "message_hex": "756e73657175656e6365642d746573742d7061796c6f6164"
+      },
+      "hex": "001955756e73657175656e6365642d746573742d7061796c6f6164",
+      "name": "unsequenced_data",
+      "type": "U"
+    },
+    {
+      "fields": {},
+      "hex": "000152",
+      "name": "client_heartbeat",
+      "type": "R"
+    },
+    {
+      "fields": {},
+      "hex": "00014f",
+      "name": "logout_request",
+      "type": "O"
+    }
+  ]
+}
