@@ -34,8 +34,14 @@ struct Order {
     char side; // 'B'/'S'
     uint32_t price;
     uint32_t remaining_qty;
+    // 'Q' = DLP (from F), ' ' = plain. Not in the prototype (which never
+    // consumed it downstream); inherited by U like side/book. Never dumped
+    // by book_dump, so F2 parity is unaffected.
+    char order_type;
 
-    Order() : order_number(0), side('\0'), price(0), remaining_qty(0) {}
+    Order()
+        : order_number(0), side('\0'), price(0), remaining_qty(0),
+          order_type(' ') {}
 };
 
 // One fill derived from an E against the stored passive order. side/price
@@ -73,6 +79,13 @@ public:
     // prototype: books exist once an order touched them).
     Book& book(const std::string& orderbook_id);
 
+    // Recovery-only injection (F5): place one order directly into the
+    // store + levels, no counters, no collision handling (the recovery
+    // stream is clean by construction). NEVER used on the live path.
+    void restore_order(uint64_t order_number, const std::string& orderbook_id,
+                       const std::string& group, char side, uint32_t price,
+                       uint32_t qty, char order_type);
+
     const std::unordered_map<uint64_t, Order>& orders() const {
         return orders_;
     }
@@ -95,7 +108,7 @@ public:
 private:
     void insert(uint64_t order_number, const std::string& orderbook_id,
                 const std::string& group, char side, uint32_t price,
-                uint32_t qty);
+                uint32_t qty, char order_type);
     void remove_order(const Order& order);
     bool execute(const ItchMsg& msg, Execution& execution);
     void erase(const ItchMsg& msg);

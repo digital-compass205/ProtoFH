@@ -170,8 +170,8 @@ int main(int argc, char** argv) {
                 uint64_t oc = level_orders[std::make_pair(SideKey(oid, 'B'),
                                                           it->first)];
                 std::fprintf(f, "%s,%s,level,B,%u,%s,%s\n", oid.c_str(),
-                             grp.c_str(), it->first, u64s(it->second).c_str(),
-                             u64s(oc).c_str());
+                             grp.c_str(), it->first,
+                             u64s(it->second.qty).c_str(), u64s(oc).c_str());
             }
             // Ask levels best-first (ascending price).
             const jnx::SideLevels::LevelMap& asks = book.asks().ascending();
@@ -180,8 +180,8 @@ int main(int argc, char** argv) {
                 uint64_t oc = level_orders[std::make_pair(SideKey(oid, 'S'),
                                                           it->first)];
                 std::fprintf(f, "%s,%s,level,S,%u,%s,%s\n", oid.c_str(),
-                             grp.c_str(), it->first, u64s(it->second).c_str(),
-                             u64s(oc).c_str());
+                             grp.c_str(), it->first,
+                             u64s(it->second.qty).c_str(), u64s(oc).c_str());
             }
             std::fprintf(f, "%s,%s,total,B,,%s,%s\n", oid.c_str(), grp.c_str(),
                          u64s(book.bids().total_qty()).c_str(),

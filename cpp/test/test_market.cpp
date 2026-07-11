@@ -82,21 +82,27 @@ bool store_levels_consistent(const jnx::Market& market) {
             const jnx::SideLevels& sl =
                 sides[s] == 'B' ? bit->second.bids() : bit->second.asks();
             uint64_t total = 0;
+            uint32_t total_orders = 0;
             for (jnx::SideLevels::LevelMap::const_iterator it =
                      sl.ascending().begin();
                  it != sl.ascending().end(); ++it) {
-                if (it->second == 0) return false; // empty level retained
+                if (it->second.qty == 0) return false; // empty level retained
                 std::map<std::pair<SideKey, uint32_t>, uint64_t>::iterator w =
                     want.find(std::make_pair(SideKey(bit->first, sides[s]),
                                              it->first));
-                if (w == want.end() || w->second != it->second) return false;
+                if (w == want.end() || w->second != it->second.qty)
+                    return false;
                 want.erase(w);
-                total += it->second;
+                total += it->second.qty;
+                total_orders += it->second.orders;
             }
             std::map<SideKey, uint64_t>::iterator wt =
                 want_total.find(SideKey(bit->first, sides[s]));
             uint64_t want_t = wt == want_total.end() ? 0 : wt->second;
             if (total != want_t) return false;
+            // Native running totals must agree with the recomputed sums.
+            if (sl.total_qty() != total) return false;
+            if (sl.total_orders() != total_orders) return false;
         }
     }
     return want.empty(); // no store order without a matching level

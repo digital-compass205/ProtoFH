@@ -82,6 +82,26 @@ public:
 
     ApplyResult apply(const ItchMsg& msg);
 
+    // --- recovery-only injection (F5 restart path; never used while live) --
+    // Rebuild state from a DB recovery dump. No counters, no publishing.
+    void restore_tick(uint32_t table_id, uint32_t price_start,
+                      uint32_t tick_size);
+    void restore_order(uint64_t order_number, const std::string& ticker,
+                       const std::string& group, char side, uint32_t price,
+                       uint32_t qty, char order_type);
+    // reference_price: -1 = never seen (mirrors Instrument's sentinel).
+    void restore_instrument(const std::string& ticker,
+                            const std::string& group, const std::string& isin,
+                            int64_t round_lot, int64_t tick_table_id,
+                            int64_t price_decimals, int64_t upper_limit,
+                            int64_t lower_limit, bool directory_seen,
+                            char trading_state, char short_sell_state,
+                            int64_t reference_price);
+    void restore_trades(const std::string& ticker, uint64_t trade_count,
+                        uint64_t volume, uint64_t notional,
+                        int64_t last_price, int64_t last_qty,
+                        uint64_t last_match_number);
+
     RefData refdata;
     OrderBookStore books;
     TradeTape tape;

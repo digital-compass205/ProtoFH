@@ -1,7 +1,9 @@
 // levels.h — price-aggregated levels for one order book, both sides.
-// C++ port of jnxfeed/book/orderbook.py _SideLevels/Book (qty per price;
-// the prototype tracks NO per-level order count — order counts are derived
-// from the order store by consumers that need them).
+// C++ port of jnxfeed/book/orderbook.py _SideLevels/Book. The prototype
+// tracks qty only; this port additionally maintains a live-order count per
+// level and per-side running totals (qty + orders) because the F5 record
+// builder needs them per message — the qty aggregation semantics are
+// unchanged (the F2 parity gate still applies and still passes).
 #ifndef JNX_MARKET_LEVELS_H
 #define JNX_MARKET_LEVELS_H
 
@@ -12,28 +14,41 @@
 
 namespace jnx {
 
-// Aggregated qty per price for one side. Kept ascending (like the
-// prototype's sorted list); Book's accessors present bids best-first by
-// reverse iteration.
+// One aggregated price level. Aggregate qty is uint64: individual qtys
+// are u32 but a level's sum may exceed it.
+struct Level {
+    uint64_t qty;
+    uint32_t orders;
+
+    Level() : qty(0), orders(0) {}
+};
+
+// Aggregated (qty, order count) per price for one side. Kept ascending
+// (like the prototype's sorted list); Book's accessors present bids
+// best-first by reverse iteration.
 class SideLevels {
 public:
-    // Aggregate qty as uint64: individual qtys are u32 but a level's sum
-    // may exceed it.
-    typedef std::map<uint32_t, uint64_t> LevelMap;
+    typedef std::map<uint32_t, Level> LevelMap;
 
+    SideLevels() : total_qty_(0), total_orders_(0) {}
+
+    // Adds one order's qty at price (level order count +1).
     void add(uint32_t price, uint32_t qty);
 
-    // Removes qty from the price level; erases the level at exactly zero.
-    // Returns false if the level would go negative (a logic error — the
-    // store clamps executions so this cannot happen on any input).
-    bool remove(uint32_t price, uint32_t qty);
+    // Removes qty from the price level; `order_gone` decrements the
+    // level's order count (full removal / order filled to zero) — a
+    // partial execution passes false. Erases the level at exactly zero
+    // qty. Returns false if the level would go negative (a logic error —
+    // the store clamps executions so this cannot happen on any input).
+    bool remove(uint32_t price, uint32_t qty, bool order_gone);
 
     uint64_t qty_at(uint32_t price) const {
         LevelMap::const_iterator it = levels_.find(price);
-        return it == levels_.end() ? 0 : it->second;
+        return it == levels_.end() ? 0 : it->second.qty;
     }
 
-    uint64_t total_qty() const;
+    uint64_t total_qty() const { return total_qty_; }
+    uint32_t total_orders() const { return total_orders_; }
 
     size_t size() const { return levels_.size(); }
 
@@ -42,6 +57,8 @@ public:
 
 private:
     LevelMap levels_;
+    uint64_t total_qty_;
+    uint32_t total_orders_;
 };
 
 // Both sides of one order book.
@@ -60,8 +77,8 @@ public:
     void add(char s, uint32_t price, uint32_t qty) {
         side(s).add(price, qty);
     }
-    bool remove(char s, uint32_t price, uint32_t qty) {
-        return side(s).remove(price, qty);
+    bool remove(char s, uint32_t price, uint32_t qty, bool order_gone) {
+        return side(s).remove(price, qty, order_gone);
     }
 
 private:

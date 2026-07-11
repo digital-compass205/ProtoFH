@@ -25,7 +25,8 @@ bool OrderBookStore::apply(const ItchMsg& msg, Execution& execution) {
                 return false;
             }
             insert(msg.order_number, msg.orderbook_id, msg.group, msg.side,
-                   msg.price, msg.qty);
+                   msg.price, msg.qty,
+                   msg.type == 'F' ? msg.order_type : ' ');
             return false;
         case 'E':
             return execute(msg, execution);
@@ -43,7 +44,7 @@ bool OrderBookStore::apply(const ItchMsg& msg, Execution& execution) {
 void OrderBookStore::insert(uint64_t order_number,
                             const std::string& orderbook_id,
                             const std::string& group, char side,
-                            uint32_t price, uint32_t qty) {
+                            uint32_t price, uint32_t qty, char order_type) {
     std::unordered_map<uint64_t, Order>::iterator it =
         orders_.find(order_number);
     if (it != orders_.end()) {
@@ -63,6 +64,24 @@ void OrderBookStore::insert(uint64_t order_number,
     order.side = side;
     order.price = price;
     order.remaining_qty = qty;
+    order.order_type = order_type;
+    orders_[order_number] = order;
+    book(orderbook_id).add(side, price, qty);
+}
+
+void OrderBookStore::restore_order(uint64_t order_number,
+                                   const std::string& orderbook_id,
+                                   const std::string& group, char side,
+                                   uint32_t price, uint32_t qty,
+                                   char order_type) {
+    Order order;
+    order.order_number = order_number;
+    order.orderbook_id = orderbook_id;
+    order.group = group;
+    order.side = side;
+    order.price = price;
+    order.remaining_qty = qty;
+    order.order_type = order_type;
     orders_[order_number] = order;
     book(orderbook_id).add(side, price, qty);
 }
@@ -75,7 +94,7 @@ void OrderBookStore::remove_order(const Order& order) {
     uint32_t price = order.price;
     uint32_t rem = order.remaining_qty;
     orders_.erase(order.order_number);
-    book(oid).remove(side, price, rem);
+    book(oid).remove(side, price, rem, true);
 }
 
 bool OrderBookStore::execute(const ItchMsg& msg, Execution& execution) {
@@ -97,7 +116,8 @@ bool OrderBookStore::execute(const ItchMsg& msg, Execution& execution) {
         qty = order.remaining_qty;
     }
     order.remaining_qty -= qty;
-    book(order.orderbook_id).remove(order.side, order.price, qty);
+    book(order.orderbook_id)
+        .remove(order.side, order.price, qty, order.remaining_qty == 0);
     execution.orderbook_id = order.orderbook_id;
     execution.group = order.group;
     execution.side = order.side;
@@ -135,8 +155,10 @@ void OrderBookStore::replace(const ItchMsg& msg) {
     std::string oid = it->second.orderbook_id;
     std::string group = it->second.group;
     char side = it->second.side;
+    char order_type = it->second.order_type;
     remove_order(it->second);
-    insert(msg.new_order_number, oid, group, side, msg.price, msg.qty);
+    insert(msg.new_order_number, oid, group, side, msg.price, msg.qty,
+           order_type);
 }
 
 } // namespace jnx

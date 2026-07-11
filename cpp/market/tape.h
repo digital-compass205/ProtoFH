@@ -45,6 +45,12 @@ public:
 
     const std::map<std::string, BookStats>& stats() const { return stats_; }
 
+    // Recovery-only (F5): install one book's cumulative stats wholesale
+    // (feed-wide totals are adjusted). last_price/last_qty -1 = no trade.
+    void restore_stats(const std::string& orderbook_id, uint64_t trades,
+                       uint64_t volume, uint64_t notional, int64_t last_price,
+                       int64_t last_qty, uint64_t last_match_number);
+
     uint64_t trade_count;  // total, feed-wide
     uint64_t total_volume; // total qty, feed-wide
 

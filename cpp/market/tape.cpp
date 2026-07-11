@@ -19,4 +19,20 @@ void TradeTape::record(const Execution& execution, uint64_t timestamp_ns) {
     s.has_last = true;
 }
 
+void TradeTape::restore_stats(const std::string& orderbook_id,
+                              uint64_t trades, uint64_t volume,
+                              uint64_t notional, int64_t last_price,
+                              int64_t last_qty, uint64_t last_match_number) {
+    BookStats& s = stats_[orderbook_id];
+    trade_count += trades - s.trade_count;
+    total_volume += volume - s.volume;
+    s.trade_count = trades;
+    s.volume = volume;
+    s.notional = notional;
+    s.last_price = last_price;
+    s.last_qty = last_qty;
+    s.last_match_number = last_match_number;
+    s.has_last = last_price >= 0;
+}
+
 } // namespace jnx
