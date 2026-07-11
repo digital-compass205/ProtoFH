@@ -3,5 +3,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 build/
+build-asan/
 dist/
 tests/fixtures/sample_udp.itch

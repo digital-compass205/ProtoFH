@@ -62,7 +62,7 @@ from dbquery import query as db_query  # noqa: E402
 from jnxfeed import itchfile  # noqa: E402
 
 SCENARIOS = ("baseline", "kill_fh", "kill_db", "drop_exchange",
-             "glimpse_cold", "kill_both")
+             "glimpse_cold", "kill_both", "soak")
 
 #: STATS/TABLE fields that legitimately differ between an uninterrupted
 #: baseline run and a restart scenario, and so are excluded from the
@@ -86,6 +86,9 @@ EXCLUDED_STATS_FIELDS = frozenset([
                           # final table CONTENT is identical — the actual
                           # content is what static/state/trades/orders.csv
                           # compare below.
+    "rss_kb",             # process resident set size (F8) — a real,
+                          # run-to-run-varying measurement, never expected
+                          # to match between two independent process runs.
 ])
 
 
@@ -143,6 +146,39 @@ def poll_progress(query_port, threshold, timeout=30.0, field="last_exch_seq"):
 
 def fixture_msg_count(fixture):
     return sum(1 for _ in itchfile.read_file(fixture))
+
+
+def rss_kb(pid):
+    """Current RSS (kB) of a live process from /proc/<pid>/status, or None
+    if the process is gone or /proc is unavailable (non-Linux — never on
+    our two target OSes, but fail soft)."""
+    try:
+        with open("/proc/{}/status".format(pid), "r") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def build_looped_fixture(fixture, out_path, min_messages):
+    """Concatenates whole copies of ``fixture`` (self-delimited
+    length-prefixed messages, see jnxfeed.itchfile) into ``out_path``
+    until it holds at least ``min_messages`` messages. Concatenating raw
+    bytes is sufficient — no need to parse — because the file format has
+    no header/trailer, just a flat repeated stream of framed messages.
+    Returns the total message count written."""
+    with open(fixture, "rb") as f:
+        chunk = f.read()
+    per_copy = fixture_msg_count(fixture)
+    if per_copy == 0:
+        raise RuntimeError("fixture {} has no messages".format(fixture))
+    copies = -(-min_messages // per_copy)  # ceil division
+    with open(out_path, "wb") as out:
+        for _ in range(copies):
+            out.write(chunk)
+    return copies * per_copy
 
 
 class Proc(object):
@@ -821,6 +857,146 @@ def run_kill_both(runner, total_msgs, pct=0.4, restart_delay=0.5):
     return ok, dest
 
 
+def run_soak(runner, minutes, speed, poll_interval=15.0):
+    """F8 soak/leak check: one long-lived jnxdb + jnxfh pair fed a looped
+    copy of the fixture (concatenated ahead of time — see
+    build_looped_fixture — so the run is one continuous SoupBinTCP
+    session with no restarts needed), polling RSS of both processes every
+    ``poll_interval`` seconds for ``minutes`` minutes. This doubles as an
+    orders-table churn exercise (real A/E/D/U traffic, repeated many
+    times over) and, because the same order numbers recur every loop, a
+    stress test of the order-number-collision path (JNX_PLAN.md
+    §3.3(3)) — collisions are expected and handled, not a failure.
+
+    PASS iff, after discarding the first 20% of samples as warmup, RSS
+    growth (last sample vs. first post-warmup sample) is < 5% for BOTH
+    jnxdb and jnxfh.
+
+    Returns (ok, evidence_dict) where evidence_dict has the sample
+    curves for reporting.
+    """
+    duration_s = minutes * 60.0
+    # Build a fixture long enough to comfortably outlast the requested
+    # duration at the given pace (30% buffer) so the exchange session
+    # doesn't hit end-of-session and exit jnxfh before we're done polling.
+    min_messages = int(duration_s * speed * 1.3) + 1
+    looped_path = os.path.join(runner.sock_dir, "soak_loop.itch")
+    total_msgs = build_looped_fixture(runner.fixture, looped_path, min_messages)
+    runner.fixture = looped_path
+
+    sock_path = runner.new_sock_path()
+    query_port = free_port()
+    itch_port = free_port()
+    glimpse_port = free_port()
+
+    db = runner.start_db(sock_path, query_port)
+    runner.start_sim(itch_port, glimpse_port)
+    fh = runner.start_fh(itch_port, glimpse_port, sock_path, query_port,
+                         "replay", "jnxfh")
+
+    db_pid = db.popen.pid
+    fh_pid = fh.popen.pid
+
+    samples = []  # (elapsed_s, db_rss_kb, fh_rss_kb, last_exch_seq)
+    start = time.monotonic()
+    ended_early = False
+    while True:
+        elapsed = time.monotonic() - start
+        if elapsed >= duration_s:
+            break
+        if fh.poll() is not None:
+            ended_early = True
+            break
+        if db.poll() is not None:
+            ended_early = True
+            break
+        db_rss = rss_kb(db_pid)
+        fh_rss = rss_kb(fh_pid)
+        try:
+            last_seq = int(stats_dict(query_port).get("last_exch_seq", -1))
+        except (OSError, socket.timeout):
+            last_seq = -1
+        samples.append((elapsed, db_rss, fh_rss, last_seq))
+        # Sleep in short slices so an early process exit is noticed
+        # promptly instead of only at the next 15 s tick.
+        slept = 0.0
+        while slept < poll_interval and elapsed + slept < duration_s:
+            time.sleep(min(1.0, poll_interval - slept))
+            slept += 1.0
+            if fh.poll() is not None or db.poll() is not None:
+                break
+
+    # Final sample.
+    if fh.poll() is None and db.poll() is None:
+        db_rss = rss_kb(db_pid)
+        fh_rss = rss_kb(fh_pid)
+        try:
+            last_seq = int(stats_dict(query_port).get("last_exch_seq", -1))
+        except (OSError, socket.timeout):
+            last_seq = -1
+        samples.append((time.monotonic() - start, db_rss, fh_rss, last_seq))
+
+    runner.evidence.append(
+        "soak: ran {:.1f} min (target {:.1f} min), {} samples, "
+        "looped fixture={} msgs, ended_early={}".format(
+            (time.monotonic() - start) / 60.0, minutes, len(samples),
+            total_msgs, ended_early))
+
+    ok = (not ended_early) and len(samples) >= 4
+
+    def growth(values):
+        clean = [v for v in values if v is not None]
+        if len(clean) < 2:
+            return None, None, None
+        warmup = max(1, int(len(clean) * 0.2))
+        post = clean[warmup:] or clean[-1:]
+        base = post[0]
+        last = post[-1]
+        if base <= 0:
+            return base, last, None
+        pct = 100.0 * (last - base) / base
+        return base, last, pct
+
+    db_series = [s[1] for s in samples]
+    fh_series = [s[2] for s in samples]
+    db_base, db_last, db_pct = growth(db_series)
+    fh_base, fh_last, fh_pct = growth(fh_series)
+
+    for label, pct in (("jnxdb", db_pct), ("jnxfh", fh_pct)):
+        if pct is None:
+            ok = False
+            runner.evidence.append(
+                "soak: {} RSS growth could not be computed (insufficient "
+                "samples)".format(label))
+        else:
+            within = pct < 5.0
+            ok = ok and within
+            runner.evidence.append(
+                "soak: {} RSS growth post-warmup = {:+.2f}% ({}kB -> {}kB) "
+                "-- {}".format(label, pct, db_base if label == "jnxdb"
+                               else fh_base,
+                               db_last if label == "jnxdb" else fh_last,
+                               "PASS" if within else "FAIL (>=5%)"))
+
+    runner.evidence.append("soak: RSS curve (elapsed_s, db_kb, fh_kb, "
+                           "last_exch_seq):")
+    for s in samples:
+        runner.evidence.append(
+            "soak:   {:7.1f}s  db={!s:>8}  fh={!s:>8}  seq={}".format(*s))
+
+    dest = os.path.join(runner.out_dir, "soak")
+    os.makedirs(dest, exist_ok=True)
+    with open(os.path.join(dest, "rss_curve.csv"), "w") as f:
+        f.write("elapsed_s,db_rss_kb,fh_rss_kb,last_exch_seq\n")
+        for s in samples:
+            f.write("{},{},{},{}\n".format(*s))
+
+    # Cleanup is via runner.teardown() (called by the caller) — it
+    # SIGKILLs every process in runner.procs, which includes sim/db/fh
+    # started above.
+    return ok, dest
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
@@ -829,8 +1005,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=
                                      argparse.RawDescriptionHelpFormatter)
+    default_fixture = os.path.join(REPO_ROOT, "tests", "fixtures",
+                                   "sample_udp_head.itch")
     parser.add_argument("--scenario", required=True, choices=SCENARIOS)
-    parser.add_argument("--fixture", required=True)
+    parser.add_argument("--fixture", required=False, default=None,
+                        help="required for all scenarios except 'soak', "
+                             "which defaults to "
+                             "tests/fixtures/sample_udp_head.itch (it "
+                             "loops the fixture itself, see --minutes)")
     parser.add_argument("--out", default=None,
                         help="results directory (default: a fresh tmp dir)")
     parser.add_argument("--paced", action="store_true",
@@ -838,38 +1020,58 @@ def main(argv=None):
                              "msgs/sec); scenarios that need to land a "
                              "kill mid-stream force this on regardless")
     parser.add_argument("--speed", type=float, default=300.0,
-                        help="paced messages/sec (default %(default)s)")
+                        help="paced messages/sec (default %(default)s; "
+                             "for 'soak' this is the sustained replay "
+                             "pace used to size the looped fixture)")
+    parser.add_argument("--minutes", type=float, default=30.0,
+                        help="'soak' scenario only: how long to run and "
+                             "poll RSS (default %(default)s, plan floor "
+                             "is 30; the F8 quick check uses 10)")
+    parser.add_argument("--poll-interval", type=float, default=15.0,
+                        help="'soak' scenario only: RSS poll period in "
+                             "seconds (default %(default)s)")
     args = parser.parse_args(argv)
 
-    fixture = os.path.abspath(args.fixture)
+    if args.fixture is None:
+        if args.scenario != "soak":
+            parser.error("--fixture is required for scenario " +
+                         args.scenario)
+        fixture = default_fixture
+    else:
+        fixture = os.path.abspath(args.fixture)
     if not os.path.exists(JNXDB) or not os.path.exists(JNXFH):
         print("run_e2e: build cpp first (make -C cpp all)", file=sys.stderr)
         return 2
 
-    needs_pacing = args.scenario in ("kill_fh", "kill_db", "kill_both")
+    needs_pacing = args.scenario in ("kill_fh", "kill_db", "kill_both",
+                                     "soak")
     speed = args.speed if (args.paced or needs_pacing) else "max"
 
     out_dir = args.out or tempfile.mkdtemp(
         prefix="jnx-e2e-{}-".format(args.scenario))
     os.makedirs(out_dir, exist_ok=True)
 
-    total_msgs = fixture_msg_count(fixture)
     runner = Runner(fixture, out_dir, speed)
     ok = False
     dest = None
     try:
-        if args.scenario == "baseline":
-            ok, dest = run_baseline(runner, total_msgs)
-        elif args.scenario == "kill_fh":
-            ok, dest = run_kill_fh(runner, total_msgs)
-        elif args.scenario == "kill_db":
-            ok, dest = run_kill_db(runner, total_msgs)
-        elif args.scenario == "drop_exchange":
-            ok, dest = run_drop_exchange(runner, total_msgs)
-        elif args.scenario == "glimpse_cold":
-            ok, dest, _tail = run_glimpse_cold(runner, total_msgs)
-        elif args.scenario == "kill_both":
-            ok, dest = run_kill_both(runner, total_msgs)
+        if args.scenario == "soak":
+            ok, dest = run_soak(runner, args.minutes, args.speed,
+                                args.poll_interval)
+        else:
+            total_msgs = fixture_msg_count(fixture)
+            if args.scenario == "baseline":
+                ok, dest = run_baseline(runner, total_msgs)
+            elif args.scenario == "kill_fh":
+                ok, dest = run_kill_fh(runner, total_msgs)
+            elif args.scenario == "kill_db":
+                ok, dest = run_kill_db(runner, total_msgs)
+            elif args.scenario == "drop_exchange":
+                ok, dest = run_drop_exchange(runner, total_msgs)
+            elif args.scenario == "glimpse_cold":
+                ok, dest, _tail = run_glimpse_cold(runner, total_msgs)
+            elif args.scenario == "kill_both":
+                ok, dest = run_kill_both(runner, total_msgs)
     finally:
         runner.teardown()
 

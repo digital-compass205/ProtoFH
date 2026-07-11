@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "common/log.h"
+#include "common/procstat.h"
 
 namespace jnx {
 
@@ -276,6 +277,7 @@ std::string QueryServer::respond(const std::string& line) const {
         os << "orders_live=" << tables_.orders().size() << "\n";
         os << "books=" << tables_.books().size() << "\n";
         os << "ticks=" << tables_.tick_row_count() << "\n";
+        os << "rss_kb=" << rss_kb() << "\n";
     } else if (cmd == "GET" || cmd == "BOOK" || cmd == "ORDERS" ||
                cmd == "TRADES") {
         if (arg.empty()) {

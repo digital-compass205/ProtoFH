@@ -2,7 +2,7 @@
 # otherwise fall back to whatever python3 is available for a fast local run.
 PY := $(shell command -v python3.6 2>/dev/null || command -v python3)
 
-.PHONY: test test-docker bench
+.PHONY: test test-docker bench dist
 
 test:
 	$(PY) -m pytest -q
@@ -17,3 +17,8 @@ bench:
 test-docker:
 	docker build -f Dockerfile.dev -t jnxfeed-test .
 	docker run --rm jnxfeed-test
+
+# Source tarball for target-machine build/validation (F8) — delegates to
+# cpp/Makefile's dist target, which shells out to tools/make_dist.py.
+dist:
+	$(MAKE) -C cpp dist

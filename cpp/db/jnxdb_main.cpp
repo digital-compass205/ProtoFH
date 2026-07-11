@@ -5,7 +5,7 @@
 // locks — every record is applied fully before the next fd is serviced,
 // which is the atomicity guarantee.
 //
-// Config (file via --cfg=PATH, overridden by --key=value):
+// Config (file via --config=PATH, overridden by --key=value):
 //   sock=/tmp/jnx-db.sock   UDS ingest path
 //   query_port=26401        TCP query port (127.0.0.1)
 //
@@ -19,6 +19,7 @@
 
 #include "common/cfg.h"
 #include "common/log.h"
+#include "common/procstat.h"
 #include "common/time.h"
 #include "db/ingest.h"
 #include "db/query.h"
@@ -41,8 +42,8 @@ int main(int argc, char** argv) {
     // Optional config file first, then --key=value overrides.
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
-        if (arg.compare(0, 6, "--cfg=") == 0) {
-            std::string path = arg.substr(6);
+        if (arg.compare(0, 9, "--config=") == 0) {
+            std::string path = arg.substr(9);
             if (!cfg.load_file(path)) {
                 LOG_WARN(COMP) << "config file not readable: " << path;
             }
@@ -179,7 +180,8 @@ int main(int argc, char** argv) {
                            << " ticks=" << tables.tick_row_count()
                            << " fh_connected="
                            << (ingest.conn_fd() >= 0 ? 1 : 0)
-                           << " query_clients=" << query.conns().size();
+                           << " query_clients=" << query.conns().size()
+                           << " rss_kb=" << jnx::rss_kb();
         }
     }
 

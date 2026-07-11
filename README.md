@@ -99,3 +99,37 @@ container (as with `make test-docker`):
 
 Both are far above real feed rates (and the plan's 50k msgs/s tuning
 threshold), so no hot-path tuning was done (T7.2).
+
+### C++ system (jnxfh/jnxdb) — F8 benchmark
+
+`make -C cpp bench` (`tools/bench.py`) replays the same full official
+sample (222,189 messages) through the C++ binaries, 3 repetitions, best
+shown. **Dev-container numbers** (Ubuntu, gcc 15, `-O2`) — not yet run on
+the RHEL 8.10 target (§8 of JNX_PLAN2.md):
+
+| stage                                          | msgs/s (dev box) |
+|-------------------------------------------------|------------------|
+| decode only (`itch_replay`)                      | ~995,000         |
+| decode + `Market.apply` (`book_dump`)            | ~655,000         |
+| full pipeline: sim(max) → `jnxfh` → `jnxdb`+mcast| ~36,000–40,000   |
+
+The full-pipeline number is measured honestly end-to-end (jnxfh's own
+"starting live loop" → "end of session" log timestamps, published-update
+count / elapsed seconds) and is **below the plan's 500k msg/s floor** —
+but the bottleneck is the Python exchange **simulator**, not jnxfh/jnxdb:
+`jnxfeed.sim` is a single-threaded Python process pushing bytes over a
+loopback TCP socket, and jnxfh spends most of its time blocked in
+`recv()` waiting on it, not doing decode/apply/publish work. jnxfh has no
+offline/file-input mode (it only speaks SoupBinTCP, by design — see
+JNX_PLAN2.md §1), so there is no way to drive it without *some* peer
+pushing bytes at *some* rate; there is thus no true "sim-less pipeline"
+number to measure directly. The honest proxy for jnxfh/jnxdb's own
+ceiling is the **decode+apply** row above (~655k msg/s) — the same
+market-apply codepath jnxfh runs per message, minus only the socket
+recv, the UDS write to jnxdb, and the multicast send jnxfh also does per
+message; those three additions are cheap kernel calls on a ~430-byte
+record and not expected to be why (c) is so much lower than (b). Both
+real feed rates and the plan's own tuning threshold (50k msgs/s) are far
+below (b), so no further hot-path tuning was done here either — see
+`tools/bench.py` for the full methodology and `make -C cpp bench`
+output for a live run.

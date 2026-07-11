@@ -19,6 +19,7 @@
 
 #include "common/cfg.h"
 #include "common/log.h"
+#include "common/procstat.h"
 #include "common/time.h"
 #include "fh/glimpse.h"
 #include "fh/publish.h"
@@ -323,7 +324,8 @@ int main(int argc, char** argv) {
                        << " books=" << fh.market.books.books().size()
                        << " orders=" << fh.market.books.orders().size()
                        << " db_connected=" << (fh.db_connected ? 1 : 0)
-                       << " mcast_errors=" << fh.mcast.send_errors();
+                       << " mcast_errors=" << fh.mcast.send_errors()
+                       << " rss_kb=" << jnx::rss_kb();
         fh.msgs_since_stats = 0;
         reactor.call_later(5000000000ULL, stats_timer_fn);
     };
