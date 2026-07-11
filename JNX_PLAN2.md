@@ -105,6 +105,8 @@ All exchange-protocol knowledge (ITCH message tables, SoupBinTCP framing, GLIMPS
 
 Primary key everywhere: **`ticker`** = 4-char SICC orderbook id (e.g. `8306`). Japannext runs one book per (ticker, group) where group ∈ {`DAY `, `NGHT`, `DAYX`, `DAYU`}; a single feed/session carries one group in practice, but the schema keys on **(ticker, group)** with ticker as the primary lookup — a plain ticker query returns all groups (usually one).
 
+**F2 outcome notes (prototype semantics won, schema reads accordingly):** the C++ market core (like the prototype) keys books/tape by **ticker alone** — the `group` column is sourced from refdata and may be blank for auto-created books; per-level `order_count` is **derived from the live-order store**, not tracked in levels; an order-number collision **replaces** the stale order (and increments the collision counter). The DB tables below simply mirror what UPDATE records carry — these notes matter to anyone reasoning about semantics, not to the DB implementation.
+
 ### T1 `static` — reference data (from `R` directory + Stock Master enrichment later)
 | field | type | source |
 |---|---|---|
