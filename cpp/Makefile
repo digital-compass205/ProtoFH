@@ -24,15 +24,18 @@ COMMON_DIR := $(ROOT)/common
 TOOLS_DIR := $(ROOT)/tools
 TEST_DIR := $(ROOT)/test
 
-# Header-only common/ for now: nothing to compile into objects yet.
-# Future phases with .cpp files (itch/, market/, wire/, db/, fh/) add
-# their own SRCS_* variables and object rules following this pattern:
-#   SRCS_jnxfh := $(wildcard $(ROOT)/fh/*.cpp) $(wildcard $(ROOT)/itch/*.cpp) ...
-#   OBJS_jnxfh := $(patsubst $(ROOT)/%.cpp,$(BUILD)/%.o,$(SRCS_jnxfh))
-#   $(BUILD)/jnxfh: $(OBJS_jnxfh) | $(BUILD)
-#	$(CXX) $(CXXFLAGS) -o $@ $(OBJS_jnxfh) $(LDFLAGS)
+# Module ("library") sources shared by tools, main binaries and tests.
+# Future phases (market/, wire/, db/, fh/) just extend MOD_DIRS; main
+# binaries get their own target following the itch_replay pattern below.
+MOD_DIRS := itch soup
+MOD_SRCS := $(foreach d,$(MOD_DIRS),$(wildcard $(ROOT)/$(d)/*.cpp))
+MOD_OBJS := $(patsubst $(ROOT)/%.cpp,$(BUILD)/%.o,$(MOD_SRCS))
 
-BINS :=
+# Conservative header dependency: any header change rebuilds everything.
+# Fine at this codebase size; swap for -MMD if it ever gets slow.
+HDRS := $(wildcard $(ROOT)/*/*.h)
+
+BINS := $(BUILD)/itch_replay
 
 .PHONY: all test clean
 
@@ -44,18 +47,23 @@ $(BUILD):
 # Pattern rule: build any object from a .cpp anywhere under cpp/, mirroring
 # the relative path under build/ so future subdirs (itch/, market/, ...)
 # don't collide.
-$(BUILD)/%.o: $(ROOT)/%.cpp | $(BUILD)
+$(BUILD)/%.o: $(ROOT)/%.cpp $(HDRS) | $(BUILD)
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -I$(ROOT) -c -o $@ $<
+
+# --- tools --------------------------------------------------------------
+
+$(BUILD)/itch_replay: $(BUILD)/tools/itch_replay.o $(MOD_OBJS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) -o $@ $(BUILD)/tools/itch_replay.o $(MOD_OBJS) $(LDFLAGS)
 
 # --- test harness -----------------------------------------------------
 
 TEST_SRCS := $(wildcard $(TEST_DIR)/test_*.cpp)
 TEST_BINS := $(patsubst $(TEST_DIR)/%.cpp,$(BUILD)/test/%,$(TEST_SRCS))
 
-$(BUILD)/test/%: $(TEST_DIR)/%.cpp | $(BUILD)
+$(BUILD)/test/%: $(TEST_DIR)/%.cpp $(MOD_OBJS) $(HDRS) | $(BUILD)
 	mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -I$(ROOT) -o $@ $< $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -I$(ROOT) -o $@ $< $(MOD_OBJS) $(LDFLAGS)
 
 test: $(TEST_BINS)
 	@for t in $(TEST_BINS); do \
