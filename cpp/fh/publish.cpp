@@ -246,17 +246,58 @@ void build_sync_dump(const Market& market, const PubContext& ctx,
         // take it from any live order of this ticker.
         std::map<std::string, Instrument>::const_iterator ii =
             market.refdata.instruments().find(t->first);
-        if (ii == market.refdata.instruments().end() ||
-            ii->second.group.empty()) {
+        bool group_known = ii != market.refdata.instruments().end() &&
+                           !ii->second.group.empty();
+        if (!group_known) {
             for (std::map<uint64_t, const Order*>::const_iterator o =
                      sorted_orders.begin();
                  o != sorted_orders.end(); ++o) {
                 if (o->second->orderbook_id == t->first) {
                     res.group = o->second->group;
+                    group_known = true;
                     break;
                 }
             }
         }
+        if (!group_known) {
+            // Neither refdata nor any currently-live order can tell us
+            // this ticker's group (it was only ever touched by orders
+            // that have since fully closed, with no directory/state
+            // record ever seen -- an inherent Market/refdata blind spot
+            // shared with the Python prototype, see refdata.cpp: group is
+            // backfilled on H/Y/S/reference-price-A but not on plain
+            // order adds, matching jnxfeed/book/refdata.py exactly).
+            // Emitting a '#' row with an empty group would create a
+            // SECOND, wrongly-keyed DB row for this ticker (empty group)
+            // alongside whatever correctly-grouped row a later live
+            // UPDATE creates -- a duplicate-key bug, not a legitimate
+            // system-wide pseudo-row. Skip the dump row instead: if the
+            // ticker is ever touched live again, that message carries
+            // its own correct group and (re)creates the row properly;
+            // if it never is, its (already-published, DB-authoritative)
+            // prior state is lost on this resync, same as any other
+            // full RESET+SYNC — documented in RECOVERY.md.
+            continue;
+        }
+        UpdateRecord rec = make_update(market, ctx, res, env);
+        n = encode_update(rec, buf);
+        out.insert(out.end(), buf, buf + n);
+    }
+
+    // Mirror the ticker="" system-wide pseudo-rows a live 'S' message
+    // produces (Market::apply's 'S' case leaves res.ticker blank and
+    // sets res.group = msg.group, "" meaning system-wide): one per
+    // group this session has ever logged a system event for. These are
+    // NOT reachable via refdata instruments or order books, so without
+    // this loop a resync silently drops them (an earlier, now-fixed
+    // version of this function also dropped groups with unresolvable
+    // per-ticker group info the same way -- see the loop above).
+    for (std::map<std::string, char>::const_iterator e =
+             ctx.last_sys_event.begin();
+         e != ctx.last_sys_event.end(); ++e) {
+        ApplyResult res;
+        res.ticker = "";
+        res.group = e->first;
         UpdateRecord rec = make_update(market, ctx, res, env);
         n = encode_update(rec, buf);
         out.insert(out.end(), buf, buf + n);
