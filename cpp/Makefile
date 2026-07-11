@@ -27,7 +27,7 @@ TEST_DIR := $(ROOT)/test
 # Module ("library") sources shared by tools, main binaries and tests.
 # Future phases (market/, wire/, db/, fh/) just extend MOD_DIRS; main
 # binaries get their own target following the itch_replay pattern below.
-MOD_DIRS := itch soup market
+MOD_DIRS := itch soup market wire
 MOD_SRCS := $(foreach d,$(MOD_DIRS),$(wildcard $(ROOT)/$(d)/*.cpp))
 MOD_OBJS := $(patsubst $(ROOT)/%.cpp,$(BUILD)/%.o,$(MOD_SRCS))
 
@@ -35,7 +35,7 @@ MOD_OBJS := $(patsubst $(ROOT)/%.cpp,$(BUILD)/%.o,$(MOD_SRCS))
 # Fine at this codebase size; swap for -MMD if it ever gets slow.
 HDRS := $(wildcard $(ROOT)/*/*.h)
 
-BINS := $(BUILD)/itch_replay $(BUILD)/book_dump
+BINS := $(BUILD)/itch_replay $(BUILD)/book_dump $(BUILD)/gen_record_vectors
 
 .PHONY: all test clean
 
@@ -59,12 +59,12 @@ $(BUILD)/itch_replay: $(BUILD)/tools/itch_replay.o $(MOD_OBJS) | $(BUILD)
 $(BUILD)/book_dump: $(BUILD)/tools/book_dump.o $(MOD_OBJS) | $(BUILD)
 	$(CXX) $(CXXFLAGS) -o $@ $(BUILD)/tools/book_dump.o $(MOD_OBJS) $(LDFLAGS)
 
+$(BUILD)/gen_record_vectors: $(BUILD)/tools/gen_record_vectors.o $(MOD_OBJS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) -o $@ $(BUILD)/tools/gen_record_vectors.o $(MOD_OBJS) $(LDFLAGS)
+
 # --- test harness -----------------------------------------------------
 
-# test_record.cpp belongs to the F3 wire codec task; it links against
-# cpp/wire/, which is wired into this Makefile by that task (add `wire`
-# to MOD_DIRS and drop this filter-out).
-TEST_SRCS := $(filter-out $(TEST_DIR)/test_record.cpp,$(wildcard $(TEST_DIR)/test_*.cpp))
+TEST_SRCS := $(wildcard $(TEST_DIR)/test_*.cpp)
 TEST_BINS := $(patsubst $(TEST_DIR)/%.cpp,$(BUILD)/test/%,$(TEST_SRCS))
 
 $(BUILD)/test/%: $(TEST_DIR)/%.cpp $(MOD_OBJS) $(HDRS) | $(BUILD)
