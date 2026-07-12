@@ -115,7 +115,8 @@ def main(argv=None):
                     continue
                 magic, version, kind_b, _blen, _res, epoch, seq = \
                     _ENVELOPE.unpack_from(data)
-                if magic != 0x4A58 or version != 1 or kind_b != b"U":
+                if (magic != records.RECORD_MAGIC or
+                        version != records.RECORD_VERSION or kind_b != b"U"):
                     bad += 1
                     continue
                 rec = None

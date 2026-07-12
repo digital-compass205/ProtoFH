@@ -68,7 +68,26 @@ ApplyResult Market::apply(const ItchMsg& msg) {
             char etype = eit != books.orders().end() ? eit->second.order_type
                                                      : ' ';
             if (books.apply(msg, execution)) {
-                tape.record(execution, make_timestamp(seconds, msg.ns));
+                // Read-only lookup (NOT refdata.get(), which auto-creates a
+                // directory_missing Instrument on first reference): an 'E'
+                // is a book-store concern, not a refdata one (market.h
+                // routing table), so it must never have the side effect of
+                // materializing a refdata record. Doing so would make a
+                // ticker that only ever trades diverge between full-replay
+                // (auto-creates locally on the first E) and GLIMPSE-sync
+                // bootstrap (the snapshot never serializes a phantom
+                // Instrument that was only ever auto-created, not backed
+                // by a real R/H/Y/reference-A) -- breaking the "final
+                // Market state identical across all paths" invariant
+                // (T6.2).
+                int64_t base_price = -1;
+                std::map<std::string, Instrument>::const_iterator ri =
+                    refdata.instruments().find(execution.orderbook_id);
+                if (ri != refdata.instruments().end()) {
+                    base_price = ri->second.reference_price;
+                }
+                tape.record(execution, make_timestamp(seconds, msg.ns),
+                           base_price);
                 res.sections = SEC_BOOK | SEC_TRADE;
                 res.ticker = execution.orderbook_id;
                 res.group = execution.group;

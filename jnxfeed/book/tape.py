@@ -18,6 +18,8 @@ with distinct match numbers and are counted separately.
 import typing
 from collections import deque
 
+from jnxfeed import types
+
 #: Default rolling-tape capacity (entries), overridable per instance.
 DEFAULT_MAX_ENTRIES = 10000
 
@@ -38,7 +40,7 @@ class BookStats(object):
     """Cumulative per-book trade statistics."""
 
     __slots__ = ("orderbook_id", "trade_count", "volume", "notional",
-                 "last_price", "last_qty")
+                 "last_price", "last_qty", "uptick")
 
     def __init__(self, orderbook_id):
         self.orderbook_id = orderbook_id
@@ -47,6 +49,14 @@ class BookStats(object):
         self.notional = 0   # sum(price * qty), raw price units
         self.last_price = None
         self.last_qty = None
+        # Short-sell uptick-rule classification (JNX_Short_Selling_Rules_
+        # 2.00): a "zero/plus/minus tick" test, not a per-trade comparison.
+        # Only a trade whose price actually differs from ``last_price``
+        # changes this -- True on a plus tick (new price higher), False on
+        # a minus tick (lower); a repeat print at the same price ("zero
+        # tick") leaves it exactly as-is. Defaults False: "beginning of
+        # trading day" is itself a flat/non-uptick state per the rule.
+        self.uptick = False
 
     def vwap(self):
         """Volume-weighted average price in raw price units (1 implied
@@ -71,9 +81,15 @@ class TradeTape(object):
         self.trade_count = 0     # total, unaffected by the rolling bound
         self.total_volume = 0
 
-    def record(self, execution, timestamp):
+    def record(self, execution, timestamp, base_price=None):
         """Record one Execution at ``timestamp`` (int ns past midnight).
-        Returns the TapeEntry appended."""
+
+        ``base_price`` is the book's reference/base price (raw int, or
+        None/NO_PRICE if unknown) -- used only as the "assumed last traded
+        price" for the short-sell uptick-rule tick test when this is the
+        book's first trade of the day; ignored once a trade has already
+        been recorded for this book. Returns the TapeEntry appended.
+        """
         entry = TapeEntry(
             timestamp=timestamp,
             orderbook_id=execution.orderbook_id,
@@ -92,6 +108,23 @@ class TradeTape(object):
         stats.trade_count += 1
         stats.volume += execution.qty
         stats.notional += execution.price * execution.qty
+
+        # Short-sell uptick-rule zero/plus/minus tick test (see
+        # BookStats.uptick doc above): compare against the effective last
+        # traded price -- the real last_price once this book has traded
+        # today, else the assumed base price -- before overwriting it.
+        effective_ltp = stats.last_price
+        if effective_ltp is None:
+            effective_ltp = base_price
+        if effective_ltp is not None and effective_ltp != types.NO_PRICE:
+            if execution.price > effective_ltp:
+                stats.uptick = True
+            elif execution.price < effective_ltp:
+                stats.uptick = False
+            # execution.price == effective_ltp (zero tick): unchanged.
+        # else: no trade yet today AND no base price known -- classification
+        # cannot be determined; leave stats.uptick at its current value.
+
         stats.last_price = execution.price
         stats.last_qty = execution.qty
         return entry

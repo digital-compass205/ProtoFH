@@ -79,8 +79,23 @@ class Market(object):
         if cls is m.OrderExecuted:
             execution = self.books.apply(msg)
             if execution is not None:
+                # Read-only lookup (NOT refdata.get(), which auto-creates a
+                # directory_missing Instrument on first reference): an `E`
+                # is a book-store concern, not a refdata one (this module's
+                # docstring routing table), so it must never have the side
+                # effect of materializing a refdata record. Doing so would
+                # make a ticker that only ever trades diverge between
+                # full-replay (auto-creates locally on the first E) and
+                # GLIMPSE-sync bootstrap (the snapshot never serializes a
+                # phantom Instrument that was only ever auto-created, not
+                # backed by a real R/H/Y/reference-A) -- breaking the
+                # "final Market state identical across all paths"
+                # invariant (T6.2).
+                inst = self.refdata.instruments.get(execution.orderbook_id)
+                base_price = inst.reference_price if inst is not None else None
                 self.tape.record(execution,
-                                 make_timestamp(self.seconds, msg.ns))
+                                 make_timestamp(self.seconds, msg.ns),
+                                 base_price)
             return execution
         # R / L / H / Y / S
         self.refdata.apply(msg)

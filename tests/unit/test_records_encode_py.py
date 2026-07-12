@@ -82,4 +82,4 @@ def test_encode_rejects_bad_values():
 
 def test_encoded_update_has_frozen_size():
     wire = records.encode_update({"kind": "U"})
-    assert len(wire) == records.UPDATE_WIRE_SIZE == 433
+    assert len(wire) == records.UPDATE_WIRE_SIZE == 437

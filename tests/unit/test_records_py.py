@@ -6,7 +6,7 @@ decodes it with the pure-Python decoder (jnxweb/records.py) and asserts
 every field of every record. The expected values below are hardcoded
 mirrors of the generator source — change them only together.
 
-Layout contract: docs/wire_spec.md version 1 (FROZEN).
+Layout contract: docs/wire_spec.md version 2 (FROZEN).
 """
 import os
 import re
@@ -92,6 +92,7 @@ def test_update_full(recs):
     assert u["short_sell_restriction"] == "0"
     assert u["reference_price"] == 15000
     assert u["last_system_event"] == "Q"
+    assert u["short_sell_price"] == 0
     # book (values mirror gen_record_vectors.cpp's loops)
     assert u["level_count_bid"] == 10
     assert u["level_count_ask"] == 10
@@ -145,6 +146,7 @@ def test_update_sync_empty_book(recs):
     assert u["short_sell_restriction"] == "?"
     assert u["reference_price"] == NO_PRICE
     assert u["last_system_event"] == "\x00"
+    assert u["short_sell_price"] == NO_PRICE
     # empty book: counts 0, every slot zero-filled
     assert u["level_count_bid"] == 0
     assert u["level_count_ask"] == 0
@@ -194,6 +196,7 @@ def test_update_trade_exec(recs):
     assert u["short_sell_restriction"] == "1"
     assert u["reference_price"] == 25000
     assert u["last_system_event"] == "Q"
+    assert u["short_sell_price"] == 25005
     assert u["level_count_bid"] == 1
     assert u["level_count_ask"] == 1
     assert u["bids"][0] == (24990, 1000, 3)
@@ -236,8 +239,8 @@ def test_update_size_matches_wire_spec_doc():
         spec = f.read()
     m = re.search(r"total wire size (\d+) bytes \(FROZEN\)", spec)
     assert m is not None, "frozen size sentence missing from docs/wire_spec.md"
-    assert records.UPDATE_WIRE_SIZE == int(m.group(1)) == 433
-    assert records.UPDATE_BODY_SIZE == 425
+    assert records.UPDATE_WIRE_SIZE == int(m.group(1)) == 437
+    assert records.UPDATE_BODY_SIZE == 429
 
 
 def test_header_validation_rejects_corruption():
@@ -251,7 +254,7 @@ def test_header_validation_rejects_corruption():
         records.decode_record(bytes(bad))
 
     bad = bytearray(good)
-    bad[2] = 2  # version
+    bad[2] = 99  # version
     with pytest.raises(records.RecordError):
         records.decode_record(bytes(bad))
 

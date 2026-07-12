@@ -14,6 +14,7 @@ import time
 
 from jnxfeed import types
 from jnxfeed.book.market import Market
+from jnxfeed.book.refdata import compute_ssp
 from jnxfeed.cli import sources
 from jnxfeed.cli.describe import describe_msg
 from jnxfeed.itch import messages as itch_messages
@@ -75,19 +76,25 @@ def _run_source(args, out, **kwargs):
 # --- static -------------------------------------------------------------------
 
 _STATIC_HEADER = ("SICC", "ISIN", "Group", "Lot", "TickTbl", "PriceDec",
-                  "Lower", "Upper", "State", "SSRestr", "RefPrice")
+                  "Lower", "Upper", "State", "SSRestr", "RefPrice", "SSP")
 
 
 def static_rows(market):
     rows = []
     for sicc in sorted(market.refdata.instruments):
         inst = market.refdata.instruments[sicc]
+        stats = market.tape.book_stats(sicc)
+        last_price = stats.last_price if stats is not None else None
+        uptick = stats.uptick if stats is not None else False
+        tick_table = market.refdata.tick_tables.get(inst.tick_table_id)
+        ssp = compute_ssp(inst.short_sell_state, inst.reference_price,
+                          last_price, uptick, tick_table)
         rows.append((
             sicc, _fmt(inst.isin), _fmt(inst.group), _fmt(inst.round_lot),
             _fmt(inst.tick_table_id), _fmt(inst.price_decimals),
             _fmt_price(inst.lower_limit), _fmt_price(inst.upper_limit),
             inst.trading_state, inst.short_sell_state,
-            _fmt_price(inst.reference_price),
+            _fmt_price(inst.reference_price), _fmt_price(ssp),
         ))
     return rows
 

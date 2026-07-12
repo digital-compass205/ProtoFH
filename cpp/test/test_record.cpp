@@ -1,5 +1,5 @@
 // test_record.cpp — round-trip + framing tests for the record codec
-// (cpp/wire/record.{h,cpp}); layout per docs/wire_spec.md v1 (FROZEN).
+// (cpp/wire/record.{h,cpp}); layout per docs/wire_spec.md v2 (FROZEN).
 #include "wire/record.h"
 
 #include <cstring>
@@ -34,6 +34,7 @@ UpdateRecord make_full_update() {
     u.short_sell_restriction = '0';
     u.reference_price = 15000;
     u.last_system_event = 'Q';
+    u.short_sell_price = 0;
     u.level_count_bid = 10;
     u.level_count_ask = 10;
     for (int i = 0; i < BOOK_DEPTH; ++i) {
@@ -83,7 +84,8 @@ bool update_eq(const UpdateRecord& a, const UpdateRecord& b) {
     if (a.trading_state != b.trading_state ||
         a.short_sell_restriction != b.short_sell_restriction ||
         a.reference_price != b.reference_price ||
-        a.last_system_event != b.last_system_event) {
+        a.last_system_event != b.last_system_event ||
+        a.short_sell_price != b.short_sell_price) {
         return false;
     }
     if (a.level_count_bid != b.level_count_bid ||
@@ -123,7 +125,7 @@ bool update_eq(const UpdateRecord& a, const UpdateRecord& b) {
 } // namespace
 
 TEST(update_size_is_frozen) {
-    CHECK_EQ(UPDATE_WIRE_SIZE, static_cast<size_t>(433));
+    CHECK_EQ(UPDATE_WIRE_SIZE, static_cast<size_t>(437));
     unsigned char buf[UPDATE_WIRE_SIZE];
     CHECK_EQ(encode_update(make_full_update(), buf), UPDATE_WIRE_SIZE);
     CHECK_EQ(encode_update(UpdateRecord(), buf), UPDATE_WIRE_SIZE);
@@ -153,6 +155,7 @@ TEST(update_round_trip_empty_book_and_no_price) {
     in.reference_price = 0x7FFFFFFFu;  // NO_PRICE sentinel
     in.trading_state = '?';
     in.short_sell_restriction = '?';
+    in.short_sell_price = 0x7FFFFFFFu;  // NO_PRICE sentinel
     in.delta_op = '#';
 
     unsigned char buf[UPDATE_WIRE_SIZE];
@@ -163,6 +166,7 @@ TEST(update_round_trip_empty_book_and_no_price) {
     CHECK(decode_update(buf, n, out, &err));
     CHECK(update_eq(in, out));
     CHECK_EQ(out.reference_price, 0x7FFFFFFFu);
+    CHECK_EQ(out.short_sell_price, 0x7FFFFFFFu);
     CHECK_EQ(static_cast<int>(out.level_count_bid), 0);
     CHECK_EQ(static_cast<int>(out.level_count_ask), 0);
     // empty ticker's static section round-trips as empty strings
@@ -177,8 +181,10 @@ TEST(update_level_slots_beyond_count_are_zero_on_wire) {
     // must zero them on the wire anyway.
     unsigned char buf[UPDATE_WIRE_SIZE];
     encode_update(in, buf);
-    const size_t bids_off = 98;  // docs/wire_spec.md book section offsets
-    const size_t asks_off = 218;
+    // docs/wire_spec.md book section offsets (wire v2: state section grew
+    // by 4 bytes for short_sell_price, shifting these +4 vs. v1's 98/218)
+    const size_t bids_off = 102;
+    const size_t asks_off = 222;
     for (size_t i = bids_off + 2 * 12; i < bids_off + 10 * 12; ++i) {
         CHECK_EQ(static_cast<int>(buf[i]), 0);
     }
@@ -209,8 +215,9 @@ TEST(update_no_uninitialized_bytes_two_payloads) {
     std::memset(bb, 0x55, sizeof(bb));
     encode_update(a, ba);
     encode_update(b, bb);
-    // level slot region must be all-zero in both
-    for (size_t i = 98; i < 98 + 240; ++i) {
+    // level slot region must be all-zero in both (wire v2: offset 102, see
+    // update_level_slots_beyond_count_are_zero_on_wire for why +4 vs. v1)
+    for (size_t i = 102; i < 102 + 240; ++i) {
         CHECK_EQ(static_cast<int>(ba[i]), 0);
         CHECK_EQ(static_cast<int>(bb[i]), 0);
     }
@@ -352,7 +359,7 @@ TEST(decode_rejects_corruption) {
 
     // bad version
     std::memcpy(bad, buf, sizeof(buf));
-    bad[2] = 2;
+    bad[2] = 99;
     err = 0;
     CHECK(!decode_update(bad, sizeof(bad), out, &err));
     CHECK(err != 0);
@@ -384,7 +391,7 @@ TEST(decode_rejects_corruption) {
 
     // excessive level count
     std::memcpy(bad, buf, sizeof(buf));
-    bad[96] = 11;  // level_count_bid offset per docs/wire_spec.md
+    bad[100] = 11;  // level_count_bid offset per docs/wire_spec.md (v2)
     err = 0;
     CHECK(!decode_update(bad, sizeof(bad), out, &err));
 }
@@ -477,7 +484,7 @@ TEST(framer_corrupt_stream) {
 }
 
 TEST(record_body_len_table) {
-    CHECK_EQ(record_body_len(KIND_UPDATE), 425);
+    CHECK_EQ(record_body_len(KIND_UPDATE), 429);
     CHECK_EQ(record_body_len(KIND_ORDER), 26);
     CHECK_EQ(record_body_len(KIND_TICK), 12);
     CHECK_EQ(record_body_len(KIND_SYNC_BEGIN), 0);

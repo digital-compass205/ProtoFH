@@ -1,4 +1,4 @@
-"""JNX record wire-format codec (docs/wire_spec.md, version 1 — FROZEN).
+"""JNX record wire-format codec (docs/wire_spec.md, version 2 — FROZEN).
 
 Python port of cpp/wire/record.{h,cpp}: decode for the multicast web
 client (jnxweb), tools/mcast_spy.py, and tests; encode (added in F4)
@@ -22,7 +22,7 @@ from collections import OrderedDict
 # --- constants (docs/wire_spec.md) ------------------------------------
 
 RECORD_MAGIC = 0x4A58  # "JX"
-RECORD_VERSION = 1
+RECORD_VERSION = 2
 RECORD_HEADER_SIZE = 8
 
 KIND_UPDATE = "U"
@@ -51,7 +51,7 @@ _HEADER = struct.Struct(">HBcHH")  # magic, version, kind, body_len, reserved
 #   static:   isin, round_lot, tick_table_id, price_decimals,
 #             upper_limit, lower_limit, flags
 #   state:    trading_state, short_sell_restriction, reference_price,
-#             last_system_event
+#             last_system_event, short_sell_price
 #   book:     level_count_bid, level_count_ask, 10 bid + 10 ask levels
 #             of (price u32, qty u32, order_count u32), totals
 #   trades:   last_price, last_qty, last_match_number, last_trade_ns,
@@ -61,7 +61,7 @@ _HEADER = struct.Struct(">HBcHH")  # magic, version, kind, body_len, reserved
 _UPDATE_BODY = struct.Struct(
     ">QQ10sQQc4s4s"        # envelope
     "12sIIBIIB"             # static (incl. flags byte)
-    "ccIc"                  # state
+    "ccIcI"                 # state (short_sell_price added in wire v2)
     "BB" + "III" * 20 +     # book: counts + 10 bid + 10 ask levels
     "QQII"                  # book totals
     "IIQQQQI"               # trade summary
@@ -85,11 +85,11 @@ BODY_SIZES = OrderedDict([
     (KIND_RESET, 0),
 ])
 
-UPDATE_BODY_SIZE = _UPDATE_BODY.size   # 425
-UPDATE_WIRE_SIZE = RECORD_HEADER_SIZE + UPDATE_BODY_SIZE  # 433 (FROZEN)
+UPDATE_BODY_SIZE = _UPDATE_BODY.size   # 429
+UPDATE_WIRE_SIZE = RECORD_HEADER_SIZE + UPDATE_BODY_SIZE  # 437 (FROZEN)
 
 # Import-time pin of the frozen sizes (mirrors the C++ static_assert).
-assert UPDATE_BODY_SIZE == 425, "UPDATE body size drifted from wire_spec"
+assert UPDATE_BODY_SIZE == 429, "UPDATE body size drifted from wire_spec"
 assert _ORDER_BODY.size == 26
 assert _TICK_BODY.size == 12
 assert _HELLO_BODY.size == 16
@@ -123,7 +123,7 @@ def decode_header(buf):
     if magic != RECORD_MAGIC:
         raise RecordError("bad record magic: 0x{:04X} (want 0x4A58)".format(magic))
     if version != RECORD_VERSION:
-        raise RecordError("unsupported record version: {} (want 1)".format(version))
+        raise RecordError("unsupported record version: {} (want 2)".format(version))
     kind = _char(kind_b)
     if kind not in BODY_SIZES:
         raise RecordError("unknown record kind: {!r}".format(kind))
@@ -164,12 +164,13 @@ def _decode_update_body(body):
     rec["short_sell_restriction"] = _char(v[16])
     rec["reference_price"] = v[17]
     rec["last_system_event"] = _char(v[18])
+    rec["short_sell_price"] = v[19]
     # book
-    rec["level_count_bid"] = v[19]
-    rec["level_count_ask"] = v[20]
+    rec["level_count_bid"] = v[20]
+    rec["level_count_ask"] = v[21]
     if rec["level_count_bid"] > BOOK_DEPTH or rec["level_count_ask"] > BOOK_DEPTH:
         raise RecordError("level count exceeds book depth 10")
-    i = 21
+    i = 22
     bids = []
     for _ in range(BOOK_DEPTH):
         bids.append((v[i], v[i + 1], v[i + 2]))  # (price, qty, order_count)
@@ -392,6 +393,7 @@ def encode_update(rec):
         _char_enc(rec.get("short_sell_restriction", "")),
         rec.get("reference_price", 0),
         _char_enc(rec.get("last_system_event", "")),
+        rec.get("short_sell_price", 0),
         n_bid,
         n_ask,
         *(level_values + [

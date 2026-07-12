@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
     full.short_sell_restriction = '0';
     full.reference_price = 15000;
     full.last_system_event = 'Q';
+    full.short_sell_price = 0;  // no restriction -> 0
     full.level_count_bid = 10;
     full.level_count_ask = 10;
     for (int i = 0; i < BOOK_DEPTH; ++i) {
@@ -134,6 +135,7 @@ int main(int argc, char** argv) {
     sync.trading_state = '?';
     sync.short_sell_restriction = '?';
     sync.reference_price = 0x7FFFFFFFu;  // NO_PRICE
+    sync.short_sell_price = 0x7FFFFFFFu; // NO_PRICE (restriction state unknown)
     sync.delta_op = '#';
     append(out, buf, encode_update(sync, buf), "update_sync_empty_book");
 
@@ -158,6 +160,7 @@ int main(int argc, char** argv) {
     trade.short_sell_restriction = '1';
     trade.reference_price = 25000;
     trade.last_system_event = 'Q';
+    trade.short_sell_price = 25005;  // restricted: min short-sell price
     trade.level_count_bid = 1;
     trade.level_count_ask = 1;
     trade.bids[0].price = 24990;

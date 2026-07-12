@@ -170,6 +170,7 @@ PAGE_HTML = """<!doctype html>
     var fields = [
       ["ticker", rec.ticker], ["isin", rec.isin],
       ["state", rec.trading_state], ["short_sell", rec.short_sell_restriction],
+      ["short_sell_price", fmtPrice(rec.short_sell_price)],
       ["ref_price", fmtPrice(rec.reference_price)],
       ["last", fmtPrice(rec.last_price) + " x " + (rec.last_qty || 0)],
       ["cum_qty", rec.cum_qty], ["exch_seq", rec.exch_seq],

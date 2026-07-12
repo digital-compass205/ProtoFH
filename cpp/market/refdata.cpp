@@ -3,6 +3,25 @@
 
 namespace jnx {
 
+uint32_t compute_ssp(char restricted, int64_t base_price, int64_t last_price,
+                     bool has_last, bool uptick, const TickTable* ticks) {
+    if (restricted != '1') {
+        return 0;
+    }
+    int64_t ltp = has_last ? last_price : base_price;
+    if (ltp < 0) {
+        return NO_PRICE; // no trade yet today and no base price known
+    }
+    if (uptick) {
+        return static_cast<uint32_t>(ltp);
+    }
+    uint32_t tick = 0;
+    if (ticks == NULL || !ticks->tick_size(static_cast<uint32_t>(ltp), tick)) {
+        return NO_PRICE; // tick size at LTP unknown
+    }
+    return static_cast<uint32_t>(ltp) + tick;
+}
+
 Instrument& RefData::get(const std::string& orderbook_id) {
     std::map<std::string, Instrument>::iterator it =
         instruments_.find(orderbook_id);

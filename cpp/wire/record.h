@@ -1,7 +1,7 @@
 // record.h — JNX record codec: the single wire format for the FH->DB UDS
 // stream, the DB->FH recovery stream, and the UDP multicast feed.
 //
-// Byte layout is FROZEN by docs/wire_spec.md (version 1) — both this codec
+// Byte layout is FROZEN by docs/wire_spec.md (version 2) — both this codec
 // and jnxweb/records.py implement that document exactly. All integers are
 // big-endian on the wire; all byte access goes through cpp/common/endian.h
 // (never struct casts). Alpha fields are space-padded on encode, stripped
@@ -18,7 +18,7 @@ namespace jnx {
 // --- header ---------------------------------------------------------------
 
 const uint16_t RECORD_MAGIC = 0x4A58;  // "JX"
-const uint8_t RECORD_VERSION = 1;
+const uint8_t RECORD_VERSION = 2;
 const size_t RECORD_HEADER_SIZE = 8;
 
 // Record kinds (header `kind` byte).
@@ -32,14 +32,14 @@ const char KIND_HELLO = 'H';
 const char KIND_RESET = 'R';
 
 // Fixed body sizes per kind (docs/wire_spec.md).
-const size_t UPDATE_BODY_SIZE = 425;
+const size_t UPDATE_BODY_SIZE = 429;
 const size_t ORDER_BODY_SIZE = 26;
 const size_t TICK_BODY_SIZE = 12;
 const size_t SYNC_END_BODY_SIZE = 26;
 const size_t HELLO_BODY_SIZE = 16;
 // SYNC_BEGIN / GET_STATE / RESET have empty bodies.
 
-const size_t UPDATE_WIRE_SIZE = RECORD_HEADER_SIZE + UPDATE_BODY_SIZE;  // 433
+const size_t UPDATE_WIRE_SIZE = RECORD_HEADER_SIZE + UPDATE_BODY_SIZE;  // 437
 const size_t ORDER_WIRE_SIZE = RECORD_HEADER_SIZE + ORDER_BODY_SIZE;    // 34
 const size_t TICK_WIRE_SIZE = RECORD_HEADER_SIZE + TICK_BODY_SIZE;      // 20
 const size_t SYNC_END_WIRE_SIZE = RECORD_HEADER_SIZE + SYNC_END_BODY_SIZE; // 34
@@ -96,6 +96,10 @@ struct UpdateRecord {
     char short_sell_restriction;  // '0'/'1'/'?'
     uint32_t reference_price;     // may be NO_PRICE
     char last_system_event;       // O/S/Q/M/E/C, '\0' = none
+    uint32_t short_sell_price;    // min accepted short-sell order price;
+                                  // 0 = no restriction, may be NO_PRICE
+                                  // (indeterminate) — see refdata.h
+                                  // compute_ssp(). Added in wire version 2.
 
     // book section (T4)
     uint8_t level_count_bid;  // 0..10

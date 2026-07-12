@@ -52,6 +52,7 @@ struct BookRow {
     char short_sell_restriction;
     uint32_t reference_price;
     char last_system_event;
+    uint32_t short_sell_price;  // min accepted short-sell price; 0 = none
     uint64_t last_exch_seq;   // from the UPDATE envelope (spec decision)
     uint64_t last_update_ns;  // from the UPDATE envelope
 

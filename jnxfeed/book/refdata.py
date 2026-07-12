@@ -99,6 +99,40 @@ class TickTable(object):
         return len(self._starts)
 
 
+def compute_ssp(restricted, base_price, last_price, uptick, tick_table):
+    """Short Sell Price (SSP): the minimum price at which a short sell
+    order is currently accepted on an order book, per Japannext Short
+    Selling Rules v2.00 (uptick rule + circuit breaker). JNX's own `Y`
+    message only ever reports whether a restriction is in effect
+    (``restricted``); the price itself is never transmitted and is
+    computed here.
+
+    - ``restricted`` != types.SHORT_SELL_RESTRICTED -> 0 (no restriction)
+    - otherwise:
+        - LTP = ``last_price`` if not None, else ``base_price`` (the
+          "beginning of the trading day" assumption); NO_PRICE if
+          neither is known
+        - ``uptick`` (see BookStats.uptick, tape.py, for how it is
+          maintained): True -> SSP = LTP; False -> SSP = LTP + tick(LTP),
+          NO_PRICE if the tick size at LTP is unknown (no ``tick_table``,
+          or LTP below every row)
+
+    ``base_price``/``last_price``: None = unknown; may also legitimately
+    be types.NO_PRICE. ``tick_table``: None = tick table unknown.
+    """
+    if restricted != types.SHORT_SELL_RESTRICTED:
+        return 0
+    ltp = last_price if last_price is not None else base_price
+    if ltp is None or ltp == types.NO_PRICE:
+        return types.NO_PRICE
+    if uptick:
+        return ltp
+    tick = tick_table.tick_size(ltp) if tick_table is not None else None
+    if tick is None:
+        return types.NO_PRICE
+    return ltp + tick
+
+
 class RefData(object):
     """The static data table plus session events."""
 

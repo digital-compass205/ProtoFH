@@ -87,6 +87,7 @@ void row_key_values(std::ostringstream& os, const Tables::Key& key,
        << "\n";
     os << "reference_price=" << price_str(r.reference_price) << "\n";
     os << "last_system_event=" << char_str(r.last_system_event) << "\n";
+    os << "short_sell_price=" << price_str(r.short_sell_price) << "\n";
     os << "last_exch_seq=" << r.last_exch_seq << "\n";
     os << "last_update_ns=" << r.last_update_ns << "\n";
     os << "total_bid_qty=" << r.total_bid_qty << "\n";
@@ -411,8 +412,8 @@ std::string QueryServer::respond(const std::string& line) const {
             }
         } else if (arg == "state") {
             os << "ticker,group,trading_state,short_sell_restriction,"
-                  "reference_price,last_system_event,last_exch_seq,"
-                  "last_update_ns\n";
+                  "reference_price,last_system_event,short_sell_price,"
+                  "last_exch_seq,last_update_ns\n";
             for (Tables::BookMap::const_iterator b = tables_.books().begin();
                  b != tables_.books().end(); ++b) {
                 const BookRow& r = b->second;
@@ -420,7 +421,8 @@ std::string QueryServer::respond(const std::string& line) const {
                    << char_str(r.trading_state) << ","
                    << char_str(r.short_sell_restriction) << ","
                    << r.reference_price << ","
-                   << char_str(r.last_system_event) << "," << r.last_exch_seq
+                   << char_str(r.last_system_event) << ","
+                   << r.short_sell_price << "," << r.last_exch_seq
                    << "," << r.last_update_ns << "\n";
             }
         } else if (arg == "trades") {

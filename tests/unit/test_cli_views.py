@@ -64,11 +64,14 @@ def test_static_table_golden(tmp_path):
     lines = text.splitlines()
     assert lines[0].split() == ["SICC", "ISIN", "Group", "Lot", "TickTbl",
                                 "PriceDec", "Lower", "Upper", "State",
-                                "SSRestr", "RefPrice"]
-    # 8306 fully announced by R; states/ref set by H/Y/ref-A.
+                                "SSRestr", "RefPrice", "SSP"]
+    # 8306 fully announced by R; states/ref set by H/Y/ref-A. Restricted
+    # ('1') with a trade (1500.0, a minus tick vs. the 1500.5 reference
+    # price) but no `L` tick-size message in this fixture: SSP cannot be
+    # computed (tick table unknown) -> NO_PRICE, rendered "-".
     row = [l for l in lines if l.startswith("8306")][0].split()
     assert row == ["8306", "JP3902900004", "DAY", "100", "1", "1",
-                   "1000.0", "2000.0", "T", "1", "1500.5"]
+                   "1000.0", "2000.0", "T", "1", "1500.5", "-"]
     # 9984 exists only as a book (A order): NOT in refdata, so no row.
     assert not [l for l in lines if l.startswith("9984")]
     assert "1 instrument(s)" in text
@@ -80,8 +83,8 @@ def test_static_csv_golden(tmp_path):
     assert code == 0
     lines = [l for l in text.splitlines() if l]
     assert lines[0] == ("SICC,ISIN,Group,Lot,TickTbl,PriceDec,Lower,Upper,"
-                        "State,SSRestr,RefPrice")
-    assert lines[1] == "8306,JP3902900004,DAY,100,1,1,1000.0,2000.0,T,1,1500.5"
+                        "State,SSRestr,RefPrice,SSP")
+    assert lines[1] == "8306,JP3902900004,DAY,100,1,1,1000.0,2000.0,T,1,1500.5,-"
     assert len(lines) == 2
 
 

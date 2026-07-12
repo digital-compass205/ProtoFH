@@ -22,6 +22,7 @@ BookRow::BookRow()
       short_sell_restriction('\0'),
       reference_price(0),
       last_system_event('\0'),
+      short_sell_price(0),
       last_exch_seq(0),
       last_update_ns(0),
       level_count_bid(0),
@@ -82,6 +83,7 @@ bool Tables::apply_update(const UpdateRecord& rec, bool in_sync) {
     row.short_sell_restriction = rec.short_sell_restriction;
     row.reference_price = rec.reference_price;
     row.last_system_event = rec.last_system_event;
+    row.short_sell_price = rec.short_sell_price;
     row.last_exch_seq = rec.exch_seq;
     row.last_update_ns = rec.exch_ns;
 
@@ -251,6 +253,7 @@ UpdateRecord Tables::make_dump_update(const Key& key,
     u.short_sell_restriction = row.short_sell_restriction;
     u.reference_price = row.reference_price;
     u.last_system_event = row.last_system_event;
+    u.short_sell_price = row.short_sell_price;
 
     u.level_count_bid = row.level_count_bid;
     u.level_count_ask = row.level_count_ask;

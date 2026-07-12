@@ -73,6 +73,25 @@ private:
     std::map<uint32_t, uint32_t> rows_; // price_start -> tick_size
 };
 
+// Short Sell Price (SSP): the minimum price at which a short sell order is
+// currently accepted on an order book, per Japannext Short Selling Rules
+// v2.00 (uptick rule + circuit breaker). JNX's own `Y` message only ever
+// reports whether a restriction is in effect (`restricted`); the price
+// itself is never transmitted and is computed here.
+//
+//   restricted != '1'          -> 0 (no restriction)
+//   restricted == '1':
+//     LTP = last_price if has_last, else base_price (the "beginning of the
+//           trading day" assumption); NO_PRICE if neither is known
+//     uptick (see BookStats::uptick, tape.h, for how it is maintained)
+//       true  -> SSP = LTP
+//       false -> SSP = LTP + tick(LTP); NO_PRICE if the tick size at LTP
+//                is unknown (no tick table / LTP below every row)
+//
+// base_price/last_price: -1 = unknown. ticks: NULL = tick table unknown.
+uint32_t compute_ssp(char restricted, int64_t base_price, int64_t last_price,
+                     bool has_last, bool uptick, const TickTable* ticks);
+
 struct SystemEvent {
     uint32_t ns;
     std::string group; // "" = system-wide

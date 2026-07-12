@@ -1,4 +1,4 @@
-# JNX record wire specification — version 1 (FROZEN)
+# JNX record wire specification — version 2 (FROZEN)
 
 This document is the contract for the record format carried on the
 `jnxfh` → `jnxdb` UNIX-domain stream socket, the `jnxdb` → `jnxfh`
@@ -25,8 +25,10 @@ codecs, their tests, and `cpp/test/vectors/records.bin` in one commit.
   `'?'` (0x3F) is a *value* (the "unknown yet" states of JNX_PLAN2.md
   §2 T2), not a fill byte.
 - **Prices** are the ITCH convention: u32, 1 implied decimal (tenths of
-  yen); `0x7FFFFFFF` = NO_PRICE sentinel (valid in `reference_price`
-  only). Encoded as plain u32.
+  yen); `0x7FFFFFFF` = NO_PRICE sentinel, valid in `reference_price`
+  (no reference price seen) and, since version 2, in `short_sell_price`
+  (restriction in effect but the price cannot yet be computed — see the
+  State section below). Encoded as plain u32.
 - **Zero fill**: every byte of every record is defined. Unused level
   slots, unused delta fields, and the header `reserved` field are
   zero-filled by the encoder no matter what the in-memory struct holds.
@@ -39,7 +41,7 @@ codecs, their tests, and `cpp/test/vectors/records.bin` in one commit.
 | offset | field    | size | type  | notes                                              |
 |-------:|----------|-----:|-------|----------------------------------------------------|
 | 0      | magic    | 2    | u16   | 0x4A58 (ASCII "JX")                                |
-| 2      | version  | 1    | u8    | 1. Decoders reject any other value.                |
+| 2      | version  | 1    | u8    | 2. Decoders reject any other value.                |
 | 3      | kind     | 1    | char  | one of `U O K B E G H R` (tables below)            |
 | 4      | body_len | 2    | u16   | body bytes after the header; MUST equal the fixed size for `kind` (decoders reject otherwise) |
 | 6      | reserved | 2    | u16   | always 0 on encode; ignored on decode              |
@@ -48,7 +50,7 @@ Total record size = 8 + body_len. Every kind has a fixed body size:
 
 | kind | name       | body_len | total | direction / purpose                                   |
 |------|------------|---------:|------:|--------------------------------------------------------|
-| `U`  | UPDATE     | 425      | 433   | FH→DB, FH→mcast, DB→FH (recovery); full ticker state + order delta |
+| `U`  | UPDATE     | 429      | 437   | FH→DB, FH→mcast, DB→FH (recovery); full ticker state + order delta |
 | `O`  | ORDER      | 26       | 34    | FH→DB (sync dump), DB→FH (recovery); one live order row |
 | `K`  | TICK       | 12       | 20    | FH→DB, DB→FH; one tick-table row                        |
 | `B`  | SYNC_BEGIN | 0        | 8     | both directions; opens a dump                           |
@@ -57,7 +59,7 @@ Total record size = 8 + body_len. Every kind has a fixed body size:
 | `H`  | HELLO      | 16       | 24    | both directions on connect (see HELLO notes)            |
 | `R`  | RESET      | 0        | 8     | FH→DB; wipe all tables                                  |
 
-## `U` UPDATE — body 425 bytes, **total wire size 433 bytes (FROZEN)**
+## `U` UPDATE — body 429 bytes, **total wire size 437 bytes (FROZEN)**
 
 One UPDATE per exchange message: the full merged row for the affected
 (ticker, group) plus the order-level delta. Offsets include the header.
@@ -92,7 +94,7 @@ significant bit (`flags & 0x01` = directory_seen; `flags & 0x02` =
 order_collision_seen). A book auto-created by a mid-session join has
 bit0 = 0 and a zeroed static section (empty isin, all numeric statics 0).
 
-### State section (T2; offsets 89–95)
+### State section (T2; offsets 89–99)
 
 | offset | field                  | size | type | notes                                        |
 |-------:|------------------------|-----:|------|----------------------------------------------|
@@ -100,24 +102,36 @@ bit0 = 0 and a zeroed static section (empty isin, all numeric statics 0).
 | 90     | short_sell_restriction | 1    | char | `0` none / `1` in effect / `?` unknown yet    |
 | 91     | reference_price        | 4    | u32  | price; may be NO_PRICE (0x7FFFFFFF); 0 = never seen |
 | 95     | last_system_event      | 1    | char | latest `S.event` for this group (O/S/Q/M/E/C); 0x00 = none |
+| 96     | short_sell_price       | 4    | u32  | **added in version 2.** Minimum accepted short-sell order price: `0` = no restriction (`short_sell_restriction != '1'`); otherwise the uptick-rule price (see below); NO_PRICE (0x7FFFFFFF) if restricted but not yet computable (no reference price, or no trade history/tick table available) |
+
+`short_sell_price` is computed by the FH from JNX's own `short_sell_restriction`
+flag plus this order book's own last-two-trades "tick test" (JNX Short
+Selling Rules v2.00: on an uptick — the latest trade strictly above the
+one before it — the price equals the last traded price; otherwise it is
+the smallest price strictly above the last traded price, i.e. last
+traded price + one tick). A trade at an unchanged price ("zero tick")
+does not change the classification. Before this book's first trade of
+the day, the last traded price is assumed to equal the reference price.
+This value is never transmitted by the exchange feed itself — see
+`cpp/market/refdata.h` `compute_ssp()`.
 
 T2's `last_exch_seq` / `last_update_ns` are NOT separate body fields:
 the DB takes them from this record's `exch_seq` / `exch_ns` (spec
 decision — the UPDATE is by definition the last message that touched
 the ticker).
 
-### Book section (T4; offsets 96–361)
+### Book section (T4; offsets 100–365)
 
 | offset | field            | size | type | notes                                                  |
 |-------:|------------------|-----:|------|---------------------------------------------------------|
-| 96     | level_count_bid  | 1    | u8   | number of valid bid levels, 0–10                        |
-| 97     | level_count_ask  | 1    | u8   | number of valid ask levels, 0–10                        |
-| 98     | bids[10]         | 120  | —    | 10 slots × 12 bytes each (layout below), best (highest) price first |
-| 218    | asks[10]         | 120  | —    | 10 slots × 12 bytes each, best (lowest) price first     |
-| 338    | total_bid_qty    | 8    | u64  | across ALL levels of the whole book, not just top 10    |
-| 346    | total_ask_qty    | 8    | u64  |                                                          |
-| 354    | total_bid_orders | 4    | u32  | across ALL levels                                       |
-| 358    | total_ask_orders | 4    | u32  |                                                          |
+| 100    | level_count_bid  | 1    | u8   | number of valid bid levels, 0–10                        |
+| 101    | level_count_ask  | 1    | u8   | number of valid ask levels, 0–10                        |
+| 102    | bids[10]         | 120  | —    | 10 slots × 12 bytes each (layout below), best (highest) price first |
+| 222    | asks[10]         | 120  | —    | 10 slots × 12 bytes each, best (lowest) price first     |
+| 342    | total_bid_qty    | 8    | u64  | across ALL levels of the whole book, not just top 10    |
+| 350    | total_ask_qty    | 8    | u64  |                                                          |
+| 358    | total_bid_orders | 4    | u32  | across ALL levels                                       |
+| 362    | total_ask_orders | 4    | u32  |                                                          |
 
 Each 12-byte level slot:
 
@@ -130,29 +144,29 @@ Each 12-byte level slot:
 Slots at index >= the side's level_count are zero-filled (all 12 bytes
 0x00) — the encoder enforces this regardless of struct contents.
 
-### Trade summary section (T5, no tape; offsets 362–405)
+### Trade summary section (T5, no tape; offsets 366–409)
 
 | offset | field             | size | type | notes                                        |
 |-------:|-------------------|-----:|------|-----------------------------------------------|
-| 362    | last_price        | 4    | u32  | passive-order price of the last `E`; 0 = no trades |
-| 366    | last_qty          | 4    | u32  |                                               |
-| 370    | last_match_number | 8    | u64  |                                               |
-| 378    | last_trade_ns     | 8    | u64  | exchange timestamp of the last trade          |
-| 386    | cum_qty           | 8    | u64  | day cumulative traded qty                     |
-| 394    | cum_turnover      | 8    | u64  | Σ price×qty (tenth-yen × shares); VWAP = cum_turnover/cum_qty (÷10 → yen) |
-| 402    | trade_count       | 4    | u32  |                                               |
+| 366    | last_price        | 4    | u32  | passive-order price of the last `E`; 0 = no trades |
+| 370    | last_qty          | 4    | u32  |                                               |
+| 374    | last_match_number | 8    | u64  |                                               |
+| 382    | last_trade_ns     | 8    | u64  | exchange timestamp of the last trade          |
+| 390    | cum_qty           | 8    | u64  | day cumulative traded qty                     |
+| 398    | cum_turnover      | 8    | u64  | Σ price×qty (tenth-yen × shares); VWAP = cum_turnover/cum_qty (÷10 → yen) |
+| 406    | trade_count       | 4    | u32  |                                               |
 
-### Delta section (order-level mutation for T3; offsets 406–432)
+### Delta section (order-level mutation for T3; offsets 410–436)
 
 | offset | field                  | size | type | notes                                            |
 |-------:|------------------------|-----:|------|---------------------------------------------------|
-| 406    | delta_op               | 1    | char | `A` insert / `E` execute / `D` delete / `U` replace / `#` none (sync rows and non-order triggers) |
-| 407    | delta_order_number     | 8    | u64  | the affected (for `U`: the NEW) order number       |
-| 415    | delta_orig_order_number| 8    | u64  | `U` only: the replaced order number; else 0        |
-| 416    | delta_side             | 1    | char | `B`/`S`; 0x00 when op = `#`                        |
-| 417    | delta_price            | 4    | u32  | order price after the op; 0 when op = `#` or `D`   |
-| 421    | delta_qty              | 4    | u32  | remaining qty after the op (0 for `D` and a filled `E`) |
-| 425    | delta_order_type       | 1    | char | `Q` = DLP, 0x20 (space) = plain order, 0x00 when op = `#` |
+| 410    | delta_op               | 1    | char | `A` insert / `E` execute / `D` delete / `U` replace / `#` none (sync rows and non-order triggers) |
+| 411    | delta_order_number     | 8    | u64  | the affected (for `U`: the NEW) order number       |
+| 419    | delta_orig_order_number| 8    | u64  | `U` only: the replaced order number; else 0        |
+| 427    | delta_side             | 1    | char | `B`/`S`; 0x00 when op = `#`                        |
+| 428    | delta_price            | 4    | u32  | order price after the op; 0 when op = `#` or `D`   |
+| 432    | delta_qty              | 4    | u32  | remaining qty after the op (0 for `D` and a filled `E`) |
+| 436    | delta_order_type       | 1    | char | `Q` = DLP, 0x20 (space) = plain order, 0x00 when op = `#` |
 
 Unused-field fill (spec decision): when `delta_op` is `'#'` every other
 delta field is zero (numerics 0, chars 0x00). For op `D`, `delta_price`
@@ -231,3 +245,15 @@ magic/version/kind/body_len, then reads `body_len` more bytes. A
 header that fails validation means the stream is corrupt and
 unrecoverable by design: close the connection (do not attempt resync).
 On multicast, exactly one record (always an UPDATE) per datagram.
+
+## Revision history
+
+- **version 2**: added `short_sell_price` (State/T2 section, offset 96,
+  4 bytes) — the computed minimum accepted short-sell order price.
+  `U` UPDATE body grew 425 → 429 bytes (total wire 433 → 437); every
+  Book/Trade/Delta section offset shifted by +4 accordingly. Also
+  corrects a pre-existing error in this document's Delta section offset
+  column (the four fields from `delta_side` onward were listed 7 bytes
+  too low; `cpp/wire/record.cpp`'s actual sequential encode/decode was
+  never affected, only this table's prose).
+- **version 1**: initial frozen layout (Phase F3).

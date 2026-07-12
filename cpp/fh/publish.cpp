@@ -78,11 +78,35 @@ UpdateRecord make_update(const Market& market, const PubContext& ctx,
         rec.reference_price = inst.reference_price >= 0
                                   ? static_cast<uint32_t>(inst.reference_price)
                                   : 0;
+
+        // Short Sell Price (SSP): the minimum accepted short-sell order
+        // price, computed from JNX's restriction flag (never a price
+        // itself) plus this book's own last-two-trades tick classification
+        // (see refdata.h compute_ssp() / tape.h BookStats::uptick).
+        const std::map<std::string, BookStats>& stats = market.tape.stats();
+        std::map<std::string, BookStats>::const_iterator si =
+            stats.find(res.ticker);
+        int64_t last_price = si != stats.end() ? si->second.last_price : -1;
+        bool has_last = si != stats.end() && si->second.has_last;
+        bool uptick = si != stats.end() && si->second.uptick;
+        const TickTable* ticks = NULL;
+        if (inst.tick_table_id >= 0) {
+            std::map<uint32_t, TickTable>::const_iterator ti =
+                market.refdata.tick_tables().find(
+                    static_cast<uint32_t>(inst.tick_table_id));
+            if (ti != market.refdata.tick_tables().end()) {
+                ticks = &ti->second;
+            }
+        }
+        rec.short_sell_price =
+            compute_ssp(inst.short_sell_state, inst.reference_price,
+                       last_price, has_last, uptick, ticks);
     } else {
         // No refdata record at all: unknown-yet states ('?'), zero statics.
         rec.trading_state = '?';
         rec.short_sell_restriction = '?';
         rec.reference_price = 0;
+        rec.short_sell_price = NO_PRICE;
     }
     std::snprintf(rec.group, sizeof(rec.group), "%s", group.c_str());
     if (market.books.collisions > 0) {

@@ -1,4 +1,4 @@
-// record.cpp — see record.h. Byte layout frozen by docs/wire_spec.md v1.
+// record.cpp — see record.h. Byte layout frozen by docs/wire_spec.md v2.
 #include "wire/record.h"
 
 #include <cstring>
@@ -20,8 +20,8 @@ static_assert(
     //         upper_limit, lower_limit, flags
     (12 + 4 + 4 + 1 + 4 + 4 + 1) +
     // state: trading_state, short_sell_restriction, reference_price,
-    //        last_system_event
-    (1 + 1 + 4 + 1) +
+    //        last_system_event, short_sell_price
+    (1 + 1 + 4 + 1 + 4) +
     // book: level_count_bid, level_count_ask, 10+10 levels of
     //       (price u32, qty u32, order_count u32), totals
     (1 + 1 + 2 * 10 * (4 + 4 + 4) + 8 + 8 + 4 + 4) +
@@ -135,6 +135,7 @@ UpdateRecord::UpdateRecord()
       short_sell_restriction('\0'),
       reference_price(0),
       last_system_event('\0'),
+      short_sell_price(0),
       level_count_bid(0),
       level_count_ask(0),
       total_bid_qty(0),
@@ -218,6 +219,8 @@ size_t encode_update(const UpdateRecord& in, unsigned char* buf) {
     be_put_u32(p, in.reference_price);
     p += 4;
     *p++ = static_cast<unsigned char>(in.last_system_event);
+    be_put_u32(p, in.short_sell_price);
+    p += 4;
 
     // book — slots at index >= level_count are forced to zero on the wire
     // regardless of struct contents (docs/wire_spec.md zero-fill rule).
@@ -349,7 +352,7 @@ bool decode_header(const unsigned char* buf, size_t len, char* kind,
         return set_err(err, "bad record magic (want 0x4A58)");
     }
     if (buf[2] != RECORD_VERSION) {
-        return set_err(err, "unsupported record version (want 1)");
+        return set_err(err, "unsupported record version (want 2)");
     }
     char k = static_cast<char>(buf[3]);
     int want = record_body_len(k);
@@ -410,6 +413,8 @@ bool decode_update(const unsigned char* buf, size_t len, UpdateRecord& out,
     out.reference_price = be_get_u32(p);
     p += 4;
     out.last_system_event = static_cast<char>(*p++);
+    out.short_sell_price = be_get_u32(p);
+    p += 4;
 
     out.level_count_bid = *p++;
     out.level_count_ask = *p++;

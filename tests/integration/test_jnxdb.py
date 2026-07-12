@@ -274,6 +274,7 @@ def test_sync_dump_live_updates_and_queries(db):
         assert kv["isin"] == "JP3902400005"
         assert kv["trading_state"] == "T"
         assert kv["reference_price"] == "1500.0"
+        assert kv["short_sell_price"] == "0.0"
         assert kv["last_exch_seq"] == "102"
         assert kv["trade_count"] == "1"
 
@@ -304,7 +305,12 @@ def test_sync_dump_live_updates_and_queries(db):
         assert tstatic[0].startswith("ticker,group,isin")
         assert tstatic[1].startswith("8306,DAY,JP3902400005,100,1,1,")
         tstate = query(db.port, "TABLE state")
-        assert tstate[1] == "8306,DAY,T,0,15000,Q,102,102000"
+        assert tstate[0] == (
+            "ticker,group,trading_state,short_sell_restriction,"
+            "reference_price,last_system_event,short_sell_price,"
+            "last_exch_seq,last_update_ns"
+        )
+        assert tstate[1] == "8306,DAY,T,0,15000,Q,0,102,102000"
         ttrades = query(db.port, "TABLE trades")
         assert ttrades[1] == "8306,DAY,14990,200,555,102000,200,2998000,1"
     finally:
