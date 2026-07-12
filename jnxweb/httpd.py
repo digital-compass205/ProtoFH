@@ -12,6 +12,9 @@ Routes:
   GET /              -> the embedded HTML/JS/CSS page
   GET /tickers       -> JSON sorted ticker list
   GET /snap/<ticker> -> JSON full state incl. trades ring (404 if unknown)
+  GET /orders/<ticker> -> JSON live resting orders, queried on demand
+                          from jnxdb (404 if unknown, 503 if no
+                          --db-query-port was configured)
   GET /stats         -> JSON global stats
   GET /ws            -> WebSocket upgrade (handed off to jnxweb.wsock)
 """
@@ -19,7 +22,7 @@ import json
 import logging
 import socket
 
-from jnxweb import wsock
+from jnxweb import dbquery_client, wsock
 
 log = logging.getLogger("jnxweb.httpd")
 
@@ -174,13 +177,16 @@ class HttpServer(object):
     """Listening socket + router, driven by the shared reactor."""
 
     def __init__(self, reactor, state, hub, page_html,
-                host="0.0.0.0", port=8080):
+                host="0.0.0.0", port=8080, db_query_addr=None):
         self.reactor = reactor
         self.state = state
         self.hub = hub
         self.page_html = page_html
         self.host = host
         self.port = port
+        #: (host, port) of jnxdb's TCP query port, or None to serve
+        #: /orders/<ticker> as 503 -- see jnxweb.dbquery_client.
+        self.db_query_addr = db_query_addr
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -215,12 +221,32 @@ class HttpServer(object):
                 conn.respond_json(404, {"error": "unknown"})
             else:
                 conn.respond_json(200, snap)
+        elif path.startswith("/orders/"):
+            ticker = path[len("/orders/"):]
+            self._handle_orders(conn, ticker)
         elif path == "/stats":
             conn.respond_json(200, self.state.stats())
         elif path == "/ws":
             self._handle_ws_upgrade(conn, headers)
         else:
             conn.respond_json(404, {"error": "not found"})
+
+    def _handle_orders(self, conn, ticker):
+        if self.db_query_addr is None:
+            conn.respond_json(503, {"error": "db query not configured"})
+            return
+        host, port = self.db_query_addr
+
+        def on_done(rows, error):
+            if error == "unknown":
+                conn.respond_json(404, {"error": "unknown"})
+            elif error is not None:
+                log.warning("ORDERS %s: %s", ticker, error)
+                conn.respond_json(502, {"error": error})
+            else:
+                conn.respond_json(200, {"ticker": ticker, "orders": rows})
+
+        dbquery_client.OrdersQuery(self.reactor, host, port, ticker, on_done)
 
     def _handle_ws_upgrade(self, conn, headers):
         upgrade_ok = headers.get("upgrade", "").lower() == "websocket"

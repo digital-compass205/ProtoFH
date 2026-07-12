@@ -12,7 +12,7 @@ import time
 import pytest
 
 from jnxfeed.net.reactor import Reactor
-from jnxweb import httpd, state as state_mod, wsock
+from jnxweb import dbquery_client, httpd, state as state_mod, wsock
 from jnxweb.static_page import PAGE_HTML
 
 NO_PRICE = 0x7FFFFFFF
@@ -494,3 +494,176 @@ def test_httpd_websocket_end_to_end(running_server):
     assert opcode == wsock.OP_TEXT
     assert json.loads(payload.decode("utf-8"))["ticker"] == "8306"
     sock.close()
+
+
+# --- dbquery_client: reply parsing -----------------------------------------
+
+def test_parse_orders_reply_strips_terminator_and_parses_rows():
+    text = (
+        "order_number side price qty_remaining type\n"
+        "202310190000001279 S 1081.2 100 -\n"
+        "202310190000001491 B 1080.5 100 DLP\n"
+        ".\n"
+    )
+    rows, err = dbquery_client._parse_orders_reply(text)
+    assert err is None
+    assert rows == [
+        {"order_number": "202310190000001279", "side": "S", "price": "1081.2",
+         "qty_remaining": 100, "order_type": "-"},
+        {"order_number": "202310190000001491", "side": "B", "price": "1080.5",
+         "qty_remaining": 100, "order_type": "DLP"},
+    ]
+
+
+def test_parse_orders_reply_empty_book_is_header_only():
+    rows, err = dbquery_client._parse_orders_reply(
+        "order_number side price qty_remaining type\n.\n")
+    assert err is None
+    assert rows == []
+
+
+def test_parse_orders_reply_err_line_reports_unknown():
+    rows, err = dbquery_client._parse_orders_reply("ERR unknown\n.\n")
+    assert rows is None
+    assert err == "unknown"
+
+
+# --- dbquery_client: OrdersQuery against a fake jnxdb query server ----------
+
+class _FakeQueryServer(object):
+    """Blocking one-shot TCP server that speaks jnxdb's line protocol
+    (a text reply terminated by a lone '.' line, connection left open)
+    just enough to drive OrdersQuery end-to-end without a real jnxdb."""
+
+    def __init__(self, reply_text):
+        self.reply_text = reply_text
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(1)
+        self.port = self.sock.getsockname()[1]
+        self.thread = threading.Thread(target=self._serve_one, daemon=True)
+        self.thread.start()
+
+    def _serve_one(self):
+        conn, _ = self.sock.accept()
+        conn.settimeout(5)
+        buf = b""
+        while b"\n" not in buf:
+            buf += conn.recv(4096)
+        conn.sendall(self.reply_text.encode("ascii"))
+        time.sleep(0.2)  # stay open a beat, like jnxdb does
+        conn.close()
+
+    def close(self):
+        self.sock.close()
+        self.thread.join(timeout=2.0)
+
+
+def _run_orders_query(host, port, ticker, timeout=3.0):
+    reactor = Reactor()
+    result = {}
+
+    def on_done(rows, error):
+        result["rows"] = rows
+        result["error"] = error
+        reactor.stop()
+
+    dbquery_client.OrdersQuery(reactor, host, port, ticker, on_done,
+                              timeout=timeout)
+
+    def _watchdog():
+        reactor.stop()
+    reactor.call_later(timeout + 1.0, _watchdog)
+    reactor.run()
+    reactor.close()
+    return result
+
+
+def test_orders_query_success_end_to_end():
+    server = _FakeQueryServer(
+        "order_number side price qty_remaining type\n"
+        "1 B 1080.5 100 -\n.\n")
+    try:
+        result = _run_orders_query("127.0.0.1", server.port, "9511")
+    finally:
+        server.close()
+    assert result["error"] is None
+    assert result["rows"] == [
+        {"order_number": "1", "side": "B", "price": "1080.5",
+         "qty_remaining": 100, "order_type": "-"},
+    ]
+
+
+def test_orders_query_unknown_ticker():
+    server = _FakeQueryServer("ERR unknown\n.\n")
+    try:
+        result = _run_orders_query("127.0.0.1", server.port, "ZZZZ")
+    finally:
+        server.close()
+    assert result["rows"] is None
+    assert result["error"] == "unknown"
+
+
+def test_orders_query_connection_refused_reports_error():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    closed_port = sock.getsockname()[1]
+    sock.close()  # nothing listens on this port now
+    result = _run_orders_query("127.0.0.1", closed_port, "9511")
+    assert result["rows"] is None
+    assert result["error"] is not None
+
+
+# --- httpd: /orders/<ticker> route ------------------------------------------
+
+def test_httpd_orders_503_when_db_query_not_configured():
+    reactor = Reactor()
+    st = state_mod.State()
+    hub = wsock.WsHub(reactor, st)
+    server = httpd.HttpServer(reactor, st, hub, PAGE_HTML,
+                              host="127.0.0.1", port=0)
+
+    def _tick():
+        reactor.call_later(0.02, _tick)
+    reactor.call_later(0.02, _tick)
+    thread = threading.Thread(target=reactor.run, daemon=True)
+    thread.start()
+    try:
+        status, body = _get(server, "/orders/9511")
+        assert status == 503
+        assert json.loads(body) == {"error": "db query not configured"}
+    finally:
+        reactor.stop()
+        thread.join(timeout=2.0)
+
+
+def test_httpd_orders_proxies_fake_jnxdb():
+    fake_db = _FakeQueryServer(
+        "order_number side price qty_remaining type\n"
+        "1 B 1080.5 100 -\n.\n")
+    reactor = Reactor()
+    st = state_mod.State()
+    hub = wsock.WsHub(reactor, st)
+    server = httpd.HttpServer(reactor, st, hub, PAGE_HTML,
+                              host="127.0.0.1", port=0,
+                              db_query_addr=("127.0.0.1", fake_db.port))
+
+    def _tick():
+        reactor.call_later(0.02, _tick)
+    reactor.call_later(0.02, _tick)
+    thread = threading.Thread(target=reactor.run, daemon=True)
+    thread.start()
+    try:
+        status, body = _get(server, "/orders/9511")
+        assert status == 200
+        payload = json.loads(body)
+        assert payload["ticker"] == "9511"
+        assert payload["orders"] == [
+            {"order_number": "1", "side": "B", "price": "1080.5",
+             "qty_remaining": 100, "order_type": "-"},
+        ]
+    finally:
+        reactor.stop()
+        thread.join(timeout=2.0)
+        fake_db.close()

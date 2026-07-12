@@ -59,6 +59,17 @@ def build_arg_parser():
                              "canned UPDATE records with "
                              "socket.sendto(bytes, UDS_PATH); see "
                              "jnxweb/mcast.py")
+    parser.add_argument("--db-query-host", default="127.0.0.1",
+                        help="jnxdb query-port host, for the 'all orders' "
+                             "on-demand lookup (default: %(default)s -- "
+                             "jnxdb binds that port to localhost only, so "
+                             "this only works when jnxweb runs on the same "
+                             "host as jnxdb)")
+    parser.add_argument("--db-query-port", type=int, default=26401,
+                        help="jnxdb query-port TCP port (default: "
+                             "%(default)s, matching etc/jnxdb.cfg's "
+                             "default); pass --db-query-port=0 to disable "
+                             "the 'all orders' lookup entirely")
     return parser
 
 
@@ -93,9 +104,13 @@ def main(argv=None):
         sock = mcast.open_mcast_socket(group, port, args.mcast_if)
     receiver = mcast.McastReceiver(reactor, sock, state)
 
+    db_query_addr = (None if args.db_query_port == 0
+                     else (args.db_query_host, args.db_query_port))
     server = httpd.HttpServer(reactor, state, hub, PAGE_HTML,
-                              host=args.http_host, port=args.http_port)
-    log.info("http listening on %s:%s", args.http_host, server.port)
+                              host=args.http_host, port=args.http_port,
+                              db_query_addr=db_query_addr)
+    log.info("http listening on %s:%s (db_query=%s)",
+            args.http_host, server.port, db_query_addr)
     # Machine-readable readiness line for tests/tools that bind :0 and
     # need to discover the ephemeral port (also works for a fixed port).
     print("jnxweb listening on {}:{}".format(args.http_host, server.port))
