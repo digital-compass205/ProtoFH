@@ -3,7 +3,14 @@
 //
 // One command per line; every response is terminated by a lone "." line.
 // Commands: PING, GET <ticker>, BOOK <ticker>, ORDERS <ticker>,
-// TRADES <ticker>, TABLE static|state|trades, STATS.
+// TRADES <ticker>, TABLE static|state|trades, STATS, SNAP.
+//
+// SNAP is the bulk current-image snapshot: a header line
+// "SNAP epoch=<> last_exch_seq=<> session=<> count=<n>" followed by <n>
+// base64-encoded binary UPDATE records (one per book, the same frozen wire
+// format as the multicast feed) so a reconnecting client (jnxweb) can seed
+// its whole state in one round-trip and reconcile against live UDP by
+// (epoch, exch_seq). See cpp/db/query.cpp.
 //
 // Non-blocking, owned by the jnxdb poll loop. Each connection has its own
 // output buffer drained on POLLOUT: a slow query client never stalls the

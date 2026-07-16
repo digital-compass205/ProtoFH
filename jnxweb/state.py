@@ -44,6 +44,8 @@ class State(object):
         self.bad = 0
         self.gaps = 0
         self.restarts = 0
+        self.snapshots = 0
+        self.snapshot_rows = 0
         self.last_epoch = None
         self.last_restart_ts = None
         self.start_ts = time.time()
@@ -90,6 +92,85 @@ class State(object):
         self.updates += 1
         self.on_ticker_update(ticker)
 
+    def merge_snapshot(self, rows, snap_epoch):
+        """Seed state from a jnxdb SNAP snapshot without regressing live data.
+
+        `rows` are decoded UPDATE dicts (identical shape to the multicast
+        path -- they ARE binary UPDATE records, base64'd over the query
+        port), each carrying the DB row's `exch_seq` in its envelope.
+        `snap_epoch` is the DB's epoch from the SNAP header (equal to every
+        row's own `epoch`).
+
+        Runs on the reactor thread, so it is atomic w.r.t. `apply_update`;
+        no locking. Reconciliation:
+
+        - Epoch first. The canonical position is `(epoch, exch_seq)`;
+          `pub_seq` is per-epoch-local (the DB stores 0 for dump rows) and
+          is never compared here. If live is a NEWER incarnation than the
+          snapshot (snap_epoch < live), the snapshot is stale -> discard.
+          If the snapshot is newer (snap_epoch > live), we started around a
+          feed-handler restart the live feed hasn't caught up to -> treat
+          like a restart (clear + adopt), then merge.
+        - Then per-ticker last-writer-wins by `exch_seq`: insert if the
+          ticker is unknown, overwrite only if the snapshot row is strictly
+          newer than the cached one, else keep the (fresher) live row.
+
+        Returns the number of rows actually merged (inserted/overwritten).
+        """
+        if self.last_epoch is not None and snap_epoch < self.last_epoch:
+            # Snapshot is from an older FH incarnation than the live feed we
+            # are already tracking -- live is authoritative and newer.
+            return 0
+        if self.last_epoch is not None and snap_epoch > self.last_epoch:
+            # DB is a newer incarnation than any UDP we've applied.
+            self._clear_all()
+            self.restarts += 1
+            self.last_restart_ts = time.time()
+            self.last_epoch = snap_epoch
+            self._expected_pub_seq = None
+            self.on_restart(snap_epoch)
+        elif self.last_epoch is None:
+            # No live data yet -- adopt the snapshot's epoch as the working
+            # one; the next live UDP re-anchors pub_seq gap counting.
+            self.last_epoch = snap_epoch
+            self._expected_pub_seq = None
+
+        merged = 0
+        for rec in rows:
+            ticker = rec["ticker"]
+            cur = self.tickers.get(ticker)
+            if cur is not None and cur["exch_seq"] >= rec["exch_seq"]:
+                continue  # live row is as-fresh-or-fresher; keep it
+            self.tickers[ticker] = rec
+            self._seed_trade(ticker, rec)
+            merged += 1
+            self.on_ticker_update(ticker)
+        self.snapshots += 1
+        self.snapshot_rows += merged
+        return merged
+
+    def _seed_trade(self, ticker, rec):
+        """Seed a single 'last trade' ring entry from a snapshot row's trade
+        summary (SNAP carries the summary, not the 50-deep tape). Skipped
+        when the ticker has never traded, or when a live ring already holds
+        this or a newer trade for it."""
+        if not rec.get("last_trade_ns") or not rec.get("last_qty"):
+            return
+        ring = self._trades.get(ticker)
+        if ring:
+            newest = ring[-1]
+            if newest.get("exch_seq", 0) >= rec["exch_seq"]:
+                return
+        else:
+            ring = deque(maxlen=TRADE_RING_SIZE)
+            self._trades[ticker] = ring
+        ring.append(OrderedDict([
+            ("exch_seq", rec["exch_seq"]),
+            ("exch_ns", rec["exch_ns"]),
+            ("price", rec["last_price"]),
+            ("qty", rec["last_qty"]),
+        ]))
+
     def _clear_all(self):
         self.tickers.clear()
         self._trades.clear()
@@ -117,6 +198,8 @@ class State(object):
             ("bad", self.bad),
             ("gaps", self.gaps),
             ("restarts", self.restarts),
+            ("snapshots", self.snapshots),
+            ("snapshot_rows", self.snapshot_rows),
             ("last_epoch", self.last_epoch),
             ("tickers", len(self.tickers)),
             ("uptime", time.time() - self.start_ts),

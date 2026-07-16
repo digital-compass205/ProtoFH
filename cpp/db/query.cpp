@@ -33,6 +33,40 @@ bool set_nonblocking(int fd) {
     return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
+// Standard base64 of a byte range (with '=' padding). Used by SNAP to
+// carry binary UPDATE records inside the line-framed text protocol.
+std::string base64_encode(const unsigned char* data, size_t len) {
+    static const char tbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((len + 2) / 3) * 4);
+    size_t i = 0;
+    for (; i + 3 <= len; i += 3) {
+        uint32_t n = (static_cast<uint32_t>(data[i]) << 16) |
+                     (static_cast<uint32_t>(data[i + 1]) << 8) |
+                     static_cast<uint32_t>(data[i + 2]);
+        out.push_back(tbl[(n >> 18) & 63]);
+        out.push_back(tbl[(n >> 12) & 63]);
+        out.push_back(tbl[(n >> 6) & 63]);
+        out.push_back(tbl[n & 63]);
+    }
+    if (len - i == 1) {
+        uint32_t n = static_cast<uint32_t>(data[i]) << 16;
+        out.push_back(tbl[(n >> 18) & 63]);
+        out.push_back(tbl[(n >> 12) & 63]);
+        out.push_back('=');
+        out.push_back('=');
+    } else if (len - i == 2) {
+        uint32_t n = (static_cast<uint32_t>(data[i]) << 16) |
+                     (static_cast<uint32_t>(data[i + 1]) << 8);
+        out.push_back(tbl[(n >> 18) & 63]);
+        out.push_back(tbl[(n >> 12) & 63]);
+        out.push_back(tbl[(n >> 6) & 63]);
+        out.push_back('=');
+    }
+    return out;
+}
+
 // Render a price int (1 implied decimal). NO_PRICE -> "-", 0 -> "0.0".
 std::string price_str(uint32_t raw) {
     if (raw == 0x7FFFFFFFu) {
@@ -279,6 +313,28 @@ std::string QueryServer::respond(const std::string& line) const {
         os << "books=" << tables_.books().size() << "\n";
         os << "ticks=" << tables_.tick_row_count() << "\n";
         os << "rss_kb=" << rss_kb() << "\n";
+    } else if (cmd == "SNAP") {
+        // Bulk current-image snapshot for a reconnecting multicast client
+        // (jnxweb): a header line with the DB's (epoch, last_exch_seq)
+        // followed by one base64-encoded binary UPDATE record per book, in
+        // deterministic (ticker, group) order. Each record is the exact
+        // frozen wire format the multicast feed uses, so the client decodes
+        // it with the same codec and reconciles per-ticker by exch_seq. The
+        // whole reply is built from one consistent tables view (jnxdb is
+        // single-threaded — respond() runs to completion before any ingest
+        // record is serviced), so header and rows always share one epoch.
+        const Meta& m = tables_.meta();
+        os << "SNAP epoch=" << m.epoch
+           << " last_exch_seq=" << m.last_exch_seq
+           << " session=" << m.session
+           << " count=" << tables_.books().size() << "\n";
+        unsigned char buf[MAX_RECORD_WIRE_SIZE];
+        for (Tables::BookMap::const_iterator b = tables_.books().begin();
+             b != tables_.books().end(); ++b) {
+            UpdateRecord u = tables_.make_dump_update(b->first, b->second);
+            size_t n = encode_update(u, buf);
+            os << base64_encode(buf, n) << "\n";
+        }
     } else if (cmd == "GET" || cmd == "BOOK" || cmd == "ORDERS" ||
                cmd == "TRADES") {
         if (arg.empty()) {

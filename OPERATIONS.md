@@ -134,7 +134,18 @@ overlapped.
 Other useful `dbquery.py` commands: `PING` (liveness), `GET <ticker>`
 (everything about one ticker), `BOOK <ticker>`, `ORDERS <ticker>`,
 `TRADES <ticker>`, `TABLE static|state|trades` (full-table CSV dump —
-what `run_e2e.py`'s scenario comparisons use).
+what `run_e2e.py`'s scenario comparisons use), and `SNAP`.
+
+`SNAP` is the bulk current-image snapshot `jnxweb` pulls to seed its whole
+state on a mid-day (re)start without waiting for a per-ticker multicast
+update. The reply is a header line
+(`SNAP epoch=<> last_exch_seq=<> session=<> count=<n>`) followed by `n`
+base64-encoded binary UPDATE records — one per book, the exact frozen wire
+format the multicast feed uses — so a client decodes them with the same
+codec and reconciles against the live feed by `(epoch, exch_seq)`. It is
+read-only and localhost-only like every query command. `jnxweb` re-issues
+it automatically after each feed-handler restart (epoch change); a healthy
+`jnxweb STATS` line shows `snapshots` climbing by one per (re)start.
 
 ### 3.3 `mcast_spy.py` — watching the wire
 

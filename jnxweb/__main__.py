@@ -13,7 +13,7 @@ import sys
 import time
 
 from jnxfeed.net.reactor import Reactor
-from jnxweb import httpd, mcast, state as state_mod, wsock
+from jnxweb import httpd, mcast, snapshot as snapshot_mod, state as state_mod, wsock
 from jnxweb.static_page import PAGE_HTML
 
 log = logging.getLogger("jnxweb")
@@ -81,6 +81,7 @@ def main(argv=None):
 
     reactor = Reactor()
     hub_holder = {}
+    bootstrap_holder = {}
 
     def on_ticker_update(ticker):
         hub_holder["hub"].on_ticker_update(ticker)
@@ -88,6 +89,9 @@ def main(argv=None):
     def on_restart(epoch):
         log.warning("feed restarted: epoch=%s (state cleared)", epoch)
         hub_holder["hub"].on_restart(epoch)
+        bootstrap = bootstrap_holder.get("bootstrap")
+        if bootstrap is not None:
+            bootstrap.on_restart(epoch)
 
     state = state_mod.State(on_ticker_update=on_ticker_update,
                              on_restart=on_restart)
@@ -106,6 +110,15 @@ def main(argv=None):
 
     db_query_addr = (None if args.db_query_port == 0
                      else (args.db_query_host, args.db_query_port))
+
+    # Seed state from jnxdb's SNAP snapshot at startup and after every feed
+    # restart, so a mid-day (re)start shows current data without waiting for
+    # a UDP update per idle ticker. Merges by (epoch, exch_seq) against the
+    # live feed; degrades to live-only if jnxdb is unreachable/disabled.
+    bootstrap = snapshot_mod.SnapshotBootstrap(reactor, state, db_query_addr)
+    bootstrap_holder["bootstrap"] = bootstrap
+    bootstrap.start()
+
     server = httpd.HttpServer(reactor, state, hub, PAGE_HTML,
                               host=args.http_host, port=args.http_port,
                               db_query_addr=db_query_addr)
@@ -119,10 +132,11 @@ def main(argv=None):
     def log_stats():
         s = state.stats()
         log.info(
-            "STATS updates=%s bad=%s gaps=%s restarts=%s epoch=%s "
-            "tickers=%s ws_clients=%s",
+            "STATS updates=%s bad=%s gaps=%s restarts=%s snapshots=%s "
+            "snapshot_rows=%s epoch=%s tickers=%s ws_clients=%s",
             s["updates"], s["bad"], s["gaps"], s["restarts"],
-            s["last_epoch"], s["tickers"], len(hub.clients))
+            s["snapshots"], s["snapshot_rows"], s["last_epoch"],
+            s["tickers"], len(hub.clients))
         reactor.call_later(STATS_INTERVAL, log_stats)
 
     reactor.call_later(STATS_INTERVAL, log_stats)
@@ -136,6 +150,7 @@ def main(argv=None):
         reactor.run()
     finally:
         signal.signal(signal.SIGINT, old_handler)
+        bootstrap.close()
         receiver.close()
         server.close()
         for client in list(hub.clients):

@@ -3,6 +3,7 @@ epoch/trades logic, and httpd routing driven in-process against a real
 loopback socket. No live multicast needed here -- see
 tests/unit/test_jnxweb_e2e.py for the subprocess/--test-feed path.
 """
+import base64
 import json
 import socket
 import struct
@@ -12,7 +13,8 @@ import time
 import pytest
 
 from jnxfeed.net.reactor import Reactor
-from jnxweb import dbquery_client, httpd, state as state_mod, wsock
+from jnxweb import (dbquery_client, httpd, records, snapshot as snapshot_mod,
+                    state as state_mod, wsock)
 from jnxweb.static_page import PAGE_HTML
 
 NO_PRICE = 0x7FFFFFFF
@@ -369,6 +371,203 @@ def test_state_bad_datagram_counter():
     st.record_bad()
     st.record_bad()
     assert st.stats()["bad"] == 2
+
+
+# --- state: merge_snapshot (mid-day bootstrap) ------------------------------
+
+def _snap_row(ticker, epoch, exch_seq, **overrides):
+    # A snapshot row is a decoded UPDATE dict (trigger '#', pub_seq 0) --
+    # exactly what jnxdb's SNAP emits via make_dump_update.
+    return _blank_update(ticker=ticker, epoch=epoch, pub_seq=0,
+                         exch_seq=exch_seq, trigger="#", **overrides)
+
+
+def test_merge_snapshot_seeds_empty_state():
+    updates = []
+    st = state_mod.State(on_ticker_update=lambda t: updates.append(t))
+    merged = st.merge_snapshot(
+        [_snap_row("8306", 7, 100), _snap_row("9984", 7, 205)], 7)
+    assert merged == 2
+    assert st.ticker_list() == ["8306", "9984"]
+    assert st.last_epoch == 7
+    assert sorted(updates) == ["8306", "9984"]
+    assert st.stats()["snapshots"] == 1
+    assert st.stats()["snapshot_rows"] == 2
+
+
+def test_merge_snapshot_does_not_regress_fresher_live():
+    st = state_mod.State()
+    # Live feed already delivered a newer image for 8306 (exch_seq 300).
+    st.apply_update(_blank_update(ticker="8306", epoch=7, pub_seq=1,
+                                  exch_seq=300, reference_price=31000))
+    merged = st.merge_snapshot([_snap_row("8306", 7, 100,
+                                           reference_price=15000)], 7)
+    assert merged == 0
+    assert st.snapshot("8306")["reference_price"] == 31000  # live kept
+
+
+def test_merge_snapshot_overwrites_staler_live():
+    st = state_mod.State()
+    st.apply_update(_blank_update(ticker="8306", epoch=7, pub_seq=1,
+                                  exch_seq=50, reference_price=15000))
+    merged = st.merge_snapshot([_snap_row("8306", 7, 120,
+                                           reference_price=16000)], 7)
+    assert merged == 1
+    assert st.snapshot("8306")["reference_price"] == 16000  # snapshot wins
+
+
+def test_merge_snapshot_older_epoch_discarded():
+    st = state_mod.State()
+    st.apply_update(_blank_update(ticker="8306", epoch=9, pub_seq=1,
+                                  exch_seq=10, reference_price=31000))
+    merged = st.merge_snapshot([_snap_row("8306", 8, 999,
+                                           reference_price=15000)], 8)
+    assert merged == 0
+    assert st.last_epoch == 9
+    assert st.snapshot("8306")["reference_price"] == 31000
+
+
+def test_merge_snapshot_newer_epoch_clears_and_adopts():
+    restarts = []
+    st = state_mod.State(on_restart=lambda e: restarts.append(e))
+    st.apply_update(_blank_update(ticker="8306", epoch=7, pub_seq=1,
+                                  exch_seq=800, reference_price=15000))
+    merged = st.merge_snapshot(
+        [_snap_row("8306", 8, 5, reference_price=16000),
+         _snap_row("9984", 8, 6)], 8)
+    # Old-epoch 8306 image was wiped; both fresh rows seeded.
+    assert restarts == [8]
+    assert merged == 2
+    assert st.last_epoch == 8
+    assert st.ticker_list() == ["8306", "9984"]
+    assert st.snapshot("8306")["reference_price"] == 16000
+
+
+def test_merge_snapshot_order_independent_with_live():
+    # snapshot-then-live and live-then-snapshot converge to the same image.
+    def build(order):
+        st = state_mod.State()
+        live = _blank_update(ticker="8306", epoch=7, pub_seq=1, exch_seq=300,
+                             reference_price=31000)
+        snap = _snap_row("8306", 7, 100, reference_price=15000)
+        for step in order:
+            if step == "live":
+                st.apply_update(live)
+            else:
+                st.merge_snapshot([snap], 7)
+        return st.snapshot("8306")["reference_price"]
+
+    assert build(["snap", "live"]) == build(["live", "snap"]) == 31000
+
+
+# --- snapshot: SNAP reply parsing -------------------------------------------
+
+def _snap_reply_text(rows, epoch, last_exch_seq=0, session="SESS000001"):
+    lines = ["SNAP epoch={} last_exch_seq={} session={} count={}".format(
+        epoch, last_exch_seq, session, len(rows))]
+    for rec in rows:
+        lines.append(base64.b64encode(records.encode_update(rec)).decode())
+    lines.append(".")
+    return "\n".join(lines) + "\n"
+
+
+def test_parse_snap_reply_roundtrips():
+    rows = [_snap_row("8306", 7, 100), _snap_row("9984", 7, 205)]
+    text = _snap_reply_text(rows, epoch=7, last_exch_seq=205)
+    parsed, snap_epoch, err = snapshot_mod._parse_snap_reply(text)
+    assert err is None
+    assert snap_epoch == 7
+    assert [r["ticker"] for r in parsed] == ["8306", "9984"]
+    assert parsed[0]["exch_seq"] == 100 and parsed[0]["trigger"] == "#"
+
+
+def test_parse_snap_reply_empty_db():
+    text = _snap_reply_text([], epoch=0)
+    parsed, snap_epoch, err = snapshot_mod._parse_snap_reply(text)
+    assert err is None and parsed == [] and snap_epoch == 0
+
+
+def test_parse_snap_reply_count_mismatch_is_error():
+    rows = [_snap_row("8306", 7, 100)]
+    text = _snap_reply_text(rows, epoch=7)
+    text = text.replace("count=1", "count=2")  # header lies about the count
+    parsed, snap_epoch, err = snapshot_mod._parse_snap_reply(text)
+    assert parsed is None and "truncated" in err
+
+
+def test_parse_snap_reply_err_line():
+    parsed, snap_epoch, err = snapshot_mod._parse_snap_reply("ERR badcmd\n.\n")
+    assert parsed is None and "rejected" in err
+
+
+# --- snapshot: SnapshotBootstrap end-to-end over a stub jnxdb ---------------
+
+def _stub_snap_server(reply_bytes):
+    """One-shot loopback TCP server that answers the first 'SNAP' command
+    with `reply_bytes`. Returns the bound port."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def serve():
+        conn, _ = srv.accept()
+        buf = b""
+        while b"\n" not in buf:
+            chunk = conn.recv(1024)
+            if not chunk:
+                break
+            buf += chunk
+        conn.sendall(reply_bytes)
+        conn.close()
+        srv.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return port
+
+
+def _run_reactor_until(reactor, predicate, timeout=3.0):
+    def _tick():
+        reactor.call_later(0.02, _tick)
+    reactor.call_later(0.02, _tick)
+    thread = threading.Thread(target=reactor.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.time() + timeout
+        while time.time() < deadline and not predicate():
+            time.sleep(0.02)
+    finally:
+        reactor.stop()
+        thread.join(timeout=2.0)
+
+
+def test_snapshot_bootstrap_end_to_end():
+    rows = [_snap_row("8306", 7, 100), _snap_row("9984", 7, 205)]
+    reply = _snap_reply_text(rows, epoch=7, last_exch_seq=205).encode("ascii")
+    port = _stub_snap_server(reply)
+
+    reactor = Reactor()
+    st = state_mod.State()
+    boot = snapshot_mod.SnapshotBootstrap(reactor, st, ("127.0.0.1", port))
+    # Kick start() on the reactor thread (registration must not race it).
+    reactor.call_later(0.0, boot.start)
+    _run_reactor_until(reactor, lambda: st.stats()["snapshots"] > 0)
+
+    assert st.ticker_list() == ["8306", "9984"]
+    assert st.last_epoch == 7
+    assert st.snapshot("8306")["exch_seq"] == 100
+
+
+def test_snapshot_bootstrap_disabled_is_noop():
+    reactor = Reactor()
+    st = state_mod.State()
+    boot = snapshot_mod.SnapshotBootstrap(reactor, st, None)
+    boot.start()          # no db addr -> must not raise or fetch
+    boot.on_restart(9)
+    boot.close()
+    assert st.stats()["snapshots"] == 0
+    assert st.ticker_list() == []
 
 
 # --- httpd: real loopback server, reactor driven in a background thread ----

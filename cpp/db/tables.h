@@ -139,6 +139,14 @@ public:
     const TickMap& ticks() const { return ticks_; }
     const Meta& meta() const { return meta_; }
 
+    // Builds the self-contained snapshot UPDATE for one row (trigger '#',
+    // delta '#'): envelope epoch/exch_seq/session from meta + row, full
+    // static/state/book/trade sections. Used by dump_state() and by the
+    // query server's SNAP command (which base64-encodes each such record
+    // so a jnxweb client can decode it with the identical wire codec it
+    // already uses for the multicast feed). Public for that reuse + tests.
+    UpdateRecord make_dump_update(const Key& key, const BookRow& row) const;
+
     // Counters the ingest layer maintains (kept here so STATS has one home).
     void count_sync_completed() { ++meta_.syncs_completed; }
     void count_sync_discarded() { ++meta_.syncs_discarded; }
@@ -147,9 +155,6 @@ public:
     size_t tick_row_count() const;
 
 private:
-    // Builds the sync-dump UPDATE for one row (trigger '#', delta '#').
-    UpdateRecord make_dump_update(const Key& key, const BookRow& row) const;
-
     void apply_delta(const UpdateRecord& rec);
 
     BookMap books_;
